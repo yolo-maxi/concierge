@@ -69,16 +69,43 @@ export interface ConciergeProps {
   /** Start opened (ignored for inline, which is always open). */
   defaultOpen?: boolean;
 
-  /** Accent color (drives bubble, buttons, user bubbles). */
+  /** Launcher style: a labelled "pill" (default) or a round "bubble". */
+  launcher?: "pill" | "bubble";
+  /** Text on the pill launcher. Default "Ask AI". */
+  launcherLabel?: string;
+  /** Emoji to use as the launcher / header icon instead of the default spark. */
+  launcherIcon?: string;
+  /** Show a live "online" dot on the header avatar. Default true. */
+  online?: boolean;
+
+  /** Proactive teaser bubble shown above the launcher after a delay. */
+  nudge?: string;
+  /** Delay before the nudge appears, ms. Default 5000. */
+  nudgeDelay?: number;
+
+  /** Visual preset. Default "midnight" (dark). */
+  theme?: "midnight" | "light";
+  /** Primary accent color (drives gradient, buttons, user bubbles). */
   accentColor?: string;
+  /** Secondary accent for the gradient. Defaults to a tint of accentColor. */
+  accentColor2?: string;
   /** Override any --cc-* CSS variables. */
   themeVars?: Record<string, string>;
   /** Extra class + style on the root for deep overrides. */
   className?: string;
   style?: React.CSSProperties;
-  /** Show the small "powered by" credit line. Default true. */
+  /** Show the small credit line. Default true. */
   showCredit?: boolean;
+  /** Override the credit line text. */
+  creditText?: string;
 }
+
+const SparkIcon = () => (
+  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M12 2l1.7 4.8L18.5 8.5 13.7 10.2 12 15l-1.7-4.8L5.5 8.5l4.8-1.7L12 2z" />
+    <path d="M19 13.5l.95 2.55L22.5 17l-2.55.95L19 20.5l-.95-2.55L15.5 17l2.55-.95L19 13.5z" opacity=".85" />
+  </svg>
+);
 
 export function Concierge(props: ConciergeProps) {
   const {
@@ -92,11 +119,20 @@ export function Concierge(props: ConciergeProps) {
     placeholder = "Ask a question…",
     position = "bottom-right",
     defaultOpen = false,
+    launcher = "pill",
+    launcherLabel = "Ask AI",
+    launcherIcon,
+    online = true,
+    nudge,
+    nudgeDelay = 5000,
+    theme = "midnight",
     accentColor,
+    accentColor2,
     themeVars,
     className = "",
     style,
     showCredit = true,
+    creditText = "AI assistant · answers from this page only",
   } = props;
 
   const inline = position === "inline";
@@ -127,6 +163,32 @@ export function Concierge(props: ConciergeProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const styleInjected = useRef(false);
 
+  // Proactive nudge: a teaser above the launcher, shown once per tab after a
+  // short delay, only if the visitor hasn't already engaged.
+  const [showNudge, setShowNudge] = useState(false);
+  const nudgeDismissed = useRef(false);
+  useEffect(() => {
+    if (!nudge || inline) return;
+    try {
+      if (window.sessionStorage.getItem("cc_nudge_seen") === "1") return;
+    } catch {
+      /* ignore */
+    }
+    const t = window.setTimeout(() => {
+      if (!nudgeDismissed.current && !open) setShowNudge(true);
+    }, Math.max(0, nudgeDelay));
+    return () => window.clearTimeout(t);
+  }, [nudge, nudgeDelay, inline, open]);
+  const dismissNudge = () => {
+    nudgeDismissed.current = true;
+    setShowNudge(false);
+    try {
+      window.sessionStorage.setItem("cc_nudge_seen", "1");
+    } catch {
+      /* ignore */
+    }
+  };
+
   // inject stylesheet once
   useEffect(() => {
     if (styleInjected.current) return;
@@ -146,10 +208,13 @@ export function Concierge(props: ConciergeProps) {
 
   const rootVars: React.CSSProperties = {
     ...(accentColor ? ({ ["--cc-accent" as any]: accentColor } as React.CSSProperties) : {}),
+    ...(accentColor2 ? ({ ["--cc-accent-2" as any]: accentColor2 } as React.CSSProperties) : {}),
     ...(themeVars as React.CSSProperties),
     ...style,
   };
 
+  const icon = launcherIcon ? <span className="cc-emoji">{launcherIcon}</span> : <SparkIcon />;
+  const themeClass = theme === "light" ? "cc-theme-light" : "";
   const posClass = inline ? "cc-inline" : position === "bottom-left" ? "cc-bl" : "cc-br";
   const showChips = suggestions.length > 0 && messages.filter((m) => m.role === "user").length === 0;
 
@@ -162,25 +227,56 @@ export function Concierge(props: ConciergeProps) {
   const lastIsEmptyBot =
     busy && messages.length > 0 && messages[messages.length - 1].role === "assistant" && messages[messages.length - 1].content === "";
 
+  const openPanel = () => {
+    dismissNudge();
+    setOpen(true);
+  };
+
   return (
-    <div className={`cc-root ${posClass} ${className}`} style={rootVars}>
+    <div className={`cc-root ${posClass} ${themeClass} ${className}`} style={rootVars}>
       {!inline && !open && (
-        <button className="cc-bubble" aria-label={`Chat with ${brandName}`} onClick={() => setOpen(true)}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
-          </svg>
-        </button>
+        <div className="cc-launchwrap">
+          {showNudge && nudge && (
+            <div className="cc-nudge" role="button" tabIndex={0} onClick={openPanel}>
+              <button
+                className="cc-nudge-x"
+                aria-label="Dismiss"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  dismissNudge();
+                }}
+              >
+                ×
+              </button>
+              {nudge}
+            </div>
+          )}
+          <button
+            className={`cc-launch ${launcher === "pill" ? "cc-pill" : "cc-circle"}`}
+            aria-label={`Chat with ${brandName}`}
+            onClick={openPanel}
+          >
+            <span className="cc-launch-ic">{icon}</span>
+            {launcher === "pill" && <span className="cc-launch-label">{launcherLabel}</span>}
+          </button>
+        </div>
       )}
 
       {(inline || open) && (
         <div className="cc-panel" role="dialog" aria-label={`${brandName} assistant`}>
           <div className="cc-head">
             {logoUrl ? (
-              <img className="cc-logo" src={logoUrl} alt="" />
+              <div className="cc-logo" style={{ background: "transparent", boxShadow: "none" }}>
+                <img src={logoUrl} alt="" style={{ width: "100%", height: "100%", borderRadius: "inherit", objectFit: "cover" }} />
+                {online && <span className="cc-dot" />}
+              </div>
             ) : (
-              <div className="cc-logo">{brandName.charAt(0).toUpperCase()}</div>
+              <div className="cc-logo">
+                {launcherIcon ? <span className="cc-emoji">{launcherIcon}</span> : <SparkIcon />}
+                {online && <span className="cc-dot" />}
+              </div>
             )}
-            <div>
+            <div className="cc-htext">
               <div className="cc-title">{brandName}</div>
               <div className="cc-sub">{tagline}</div>
             </div>
@@ -242,7 +338,7 @@ export function Concierge(props: ConciergeProps) {
               </svg>
             </button>
           </div>
-          {showCredit && <div className="cc-credit">AI assistant · answers from this page only</div>}
+          {showCredit && <div className="cc-credit">{creditText}</div>}
         </div>
       )}
     </div>

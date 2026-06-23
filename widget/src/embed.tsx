@@ -59,8 +59,17 @@ function readConfig(): ConciergeProps | null {
     placeholder: d.placeholder,
     position: (d.position as ConciergeProps["position"]) || "bottom-right",
     defaultOpen: d.defaultOpen === "true",
+    launcher: (d.launcher as ConciergeProps["launcher"]) || undefined,
+    launcherLabel: d.launcherLabel,
+    launcherIcon: d.launcherIcon,
+    online: d.online !== "false",
+    nudge: d.nudge,
+    nudgeDelay: d.nudgeDelay ? Number(d.nudgeDelay) : undefined,
+    theme: (d.theme as ConciergeProps["theme"]) || undefined,
     accentColor: d.accentColor,
+    accentColor2: d.accentColor2,
     showCredit: d.showCredit !== "false",
+    creditText: d.creditText,
   };
   return props;
 }
