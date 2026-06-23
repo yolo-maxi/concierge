@@ -32,6 +32,17 @@ function rateLimited(ip: string): boolean {
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
+// Serve the self-mounting embed bundle so a host page only needs a <script> tag
+// pointing here — nothing has to be copied into the host's web root.
+const EMBED_PATH = process.env.CONCIERGE_EMBED_FILE;
+if (EMBED_PATH) {
+  app.get("/embed.js", (_req, res) => {
+    res.setHeader("Content-Type", "application/javascript; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.sendFile(EMBED_PATH);
+  });
+}
+
 app.post("/chat", async (req, res) => {
   const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || "unknown";
   if (rateLimited(ip)) {
