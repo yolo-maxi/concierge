@@ -12,10 +12,30 @@ interface UseChatOpts {
 }
 
 /**
+ * A stable per-visitor session id, persisted for the tab. The server turns
+ * this into a tracking emoji so one conversation is easy to follow in the logs.
+ */
+function getSessionId(): string {
+  if (typeof window === "undefined") return "ssr";
+  try {
+    const KEY = "cc_sid";
+    let sid = window.sessionStorage.getItem(KEY);
+    if (!sid) {
+      sid = "s_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      window.sessionStorage.setItem(KEY, sid);
+    }
+    return sid;
+  } catch {
+    return "s_anon";
+  }
+}
+
+/**
  * Streaming chat against the Concierge server's /chat SSE endpoint.
  * Keeps the whole transcript client-side; the server stays stateless.
  */
 export function useChat({ endpoint, pageId, greeting }: UseChatOpts) {
+  const sessionId = useRef(getSessionId());
   const [messages, setMessages] = useState<Message[]>(
     greeting ? [{ role: "assistant", content: greeting }] : []
   );
@@ -42,6 +62,8 @@ export function useChat({ endpoint, pageId, greeting }: UseChatOpts) {
           signal: ac.signal,
           body: JSON.stringify({
             pageId,
+            sessionId: sessionId.current,
+            pageUrl: typeof window !== "undefined" ? window.location.href : undefined,
             // only send real turns, not the greeting placeholder logic above
             messages: history,
           }),

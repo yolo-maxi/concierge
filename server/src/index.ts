@@ -98,7 +98,12 @@ app.post("/chat", async (req, res) => {
       brandName: brief.brandName,
       question,
       answer: full,
-      meta: { ip, pageId: body.pageId },
+      meta: {
+        ip,
+        pageId: body.pageId,
+        sessionId: typeof body.sessionId === "string" ? body.sessionId.slice(0, 64) : undefined,
+        pageUrl: typeof body.pageUrl === "string" ? body.pageUrl.slice(0, 300) : undefined,
+      },
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "stream failed";
