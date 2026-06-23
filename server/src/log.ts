@@ -59,10 +59,12 @@ export async function logToTelegram(turn: LogTurn): Promise<void> {
   const header = `${emoji} <b>${escapeHtml(where)}</b>`;
   const fromLine = turn.meta?.pageUrl ? `\n<i>from ${escapeHtml(turn.meta.pageUrl)}</i>` : "";
 
+  // The visitor's question goes in a blockquote so it's instantly clear what
+  // they wrote; the agent's reply follows underneath.
   const text =
-    `${header}${fromLine}\n\n` +
-    `<b>Q:</b> ${escapeHtml(turn.question)}\n` +
-    `<b>A:</b> ${escapeHtml(turn.answer)}`;
+    `${header}${fromLine}\n` +
+    `<blockquote>${escapeHtml(turn.question)}</blockquote>\n` +
+    `${escapeHtml(turn.answer)}`;
 
   try {
     await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
