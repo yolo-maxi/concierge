@@ -2,6 +2,48 @@ import React, { useEffect, useRef, useState } from "react";
 import { useChat } from "./useChat";
 import { CSS } from "./styles";
 
+// Render assistant text with clickable links: supports [label](url) markdown and
+// bare https URLs. Everything else stays literal text (no HTML injection).
+const MD_LINK = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+const BARE_URL = /(https?:\/\/[^\s<>()]+)/g;
+
+function renderRichText(text: string): React.ReactNode[] {
+  const out: React.ReactNode[] = [];
+  let last = 0;
+  let key = 0;
+  // First pass: markdown links. Between them, linkify bare URLs.
+  text.replace(MD_LINK, (m, label: string, url: string, offset: number) => {
+    if (offset > last) out.push(...linkifyBare(text.slice(last, offset), key++));
+    out.push(
+      <a key={`l${key++}`} href={url} target="_blank" rel="noopener noreferrer nofollow">
+        {label}
+      </a>
+    );
+    last = offset + m.length;
+    return m;
+  });
+  if (last < text.length) out.push(...linkifyBare(text.slice(last), key++));
+  return out;
+}
+
+function linkifyBare(chunk: string, baseKey: number): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  let last = 0;
+  let k = 0;
+  chunk.replace(BARE_URL, (url: string, offset: number) => {
+    if (offset > last) nodes.push(chunk.slice(last, offset));
+    nodes.push(
+      <a key={`b${baseKey}-${k++}`} href={url} target="_blank" rel="noopener noreferrer nofollow">
+        {url.replace(/^https?:\/\//, "")}
+      </a>
+    );
+    last = offset + url.length;
+    return url;
+  });
+  if (last < chunk.length) nodes.push(chunk.slice(last));
+  return nodes.length ? nodes : [chunk];
+}
+
 export interface ConciergeProps {
   /** URL of the Concierge server's /chat endpoint. Required. */
   endpoint: string;
@@ -58,7 +100,28 @@ export function Concierge(props: ConciergeProps) {
   } = props;
 
   const inline = position === "inline";
-  const [open, setOpen] = useState(inline || defaultOpen);
+  const [open, setOpenState] = useState(() => {
+    if (inline) return true;
+    if (typeof window !== "undefined") {
+      try {
+        const saved = window.sessionStorage.getItem("cc_open");
+        if (saved !== null) return saved === "1";
+      } catch {
+        /* ignore */
+      }
+    }
+    return defaultOpen;
+  });
+  const setOpen = (v: boolean) => {
+    setOpenState(v);
+    if (typeof window !== "undefined") {
+      try {
+        window.sessionStorage.setItem("cc_open", v ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+    }
+  };
   const [draft, setDraft] = useState("");
   const { messages, send, busy } = useChat({ endpoint, pageId, greeting });
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -142,7 +205,7 @@ export function Concierge(props: ConciergeProps) {
               }
               return (
                 <div key={i} className={`cc-msg ${m.role === "user" ? "cc-user" : "cc-bot"}`}>
-                  {m.content}
+                  {m.role === "assistant" ? renderRichText(m.content) : m.content}
                 </div>
               );
             })}

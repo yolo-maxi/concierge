@@ -66,6 +66,8 @@ export const CSS = `
 .cc-msg { max-width: 86%; padding: 10px 13px; border-radius: 14px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }
 .cc-msg.cc-user { align-self: flex-end; background: var(--cc-accent); color: var(--cc-accent-ink); border-bottom-right-radius: 5px; }
 .cc-msg.cc-bot { align-self: flex-start; background: var(--cc-surface); border: 1px solid var(--cc-border); border-bottom-left-radius: 5px; }
+.cc-msg.cc-bot a { color: var(--cc-accent); text-decoration: underline; text-underline-offset: 2px; font-weight: 600; word-break: break-word; }
+.cc-msg.cc-bot a:hover { opacity: 0.85; }
 
 .cc-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 2px; }
 .cc-chip { font-size: 12.5px; padding: 7px 11px; border-radius: 999px; cursor: pointer;

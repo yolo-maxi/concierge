@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface Message {
   role: "user" | "assistant";
@@ -30,17 +30,49 @@ function getSessionId(): string {
   }
 }
 
+const TRANSCRIPT_KEY = "cc_transcript";
+
+/** Restore a saved transcript for this tab so the chat survives page changes. */
+function restore(greeting?: string): Message[] {
+  if (typeof window !== "undefined") {
+    try {
+      const raw = window.sessionStorage.getItem(TRANSCRIPT_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw) as Message[];
+        // Drop a trailing empty assistant turn (an interrupted stream).
+        const clean = saved.filter(
+          (m) => m && typeof m.content === "string" && (m.content !== "" || m.role === "user")
+        );
+        if (clean.length) return clean;
+      }
+    } catch {
+      /* ignore corrupt storage */
+    }
+  }
+  return greeting ? [{ role: "assistant", content: greeting }] : [];
+}
+
 /**
  * Streaming chat against the Concierge server's /chat SSE endpoint.
- * Keeps the whole transcript client-side; the server stays stateless.
+ * Keeps the whole transcript client-side; the server stays stateless. The
+ * transcript is mirrored to sessionStorage so it persists across navigations
+ * within the same tab/site.
  */
 export function useChat({ endpoint, pageId, greeting }: UseChatOpts) {
   const sessionId = useRef(getSessionId());
-  const [messages, setMessages] = useState<Message[]>(
-    greeting ? [{ role: "assistant", content: greeting }] : []
-  );
+  const [messages, setMessages] = useState<Message[]>(() => restore(greeting));
   const [busy, setBusy] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+
+  // Persist the transcript whenever it changes (skip mid-stream empty turns).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.sessionStorage.setItem(TRANSCRIPT_KEY, JSON.stringify(messages));
+    } catch {
+      /* storage full / disabled — non-fatal */
+    }
+  }, [messages]);
 
   const send = useCallback(
     async (text: string) => {
