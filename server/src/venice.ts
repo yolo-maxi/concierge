@@ -47,6 +47,9 @@ export async function streamChat(
       temperature: opts.temperature ?? 0.3,
       max_tokens: opts.maxTokens ?? 600,
       messages,
+      // Keep replies snappy: this model "thinks" by default, which adds
+      // latency and tokens we don't want for a landing-page concierge.
+      venice_parameters: { disable_thinking: true, strip_thinking_response: true },
     }),
   });
 

@@ -15,7 +15,8 @@
   },
   "files": ["dist"],
   "scripts": {
-    "build": "tsup src/index.ts --format esm,cjs --dts --clean --external react",
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean --external react && pnpm build:embed",
+    "build:embed": "tsup src/embed.tsx --format iife --global-name ConciergeEmbed --minify --no-dts --out-dir dist && mv dist/embed.global.js dist/concierge-embed.js",
     "dev": "tsup src/index.ts --format esm,cjs --dts --watch --external react"
   },
   "peerDependencies": {
