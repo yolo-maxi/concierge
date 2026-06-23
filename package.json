@@ -1,0 +1,17 @@
+{
+  "name": "concierge-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "description": "A deliberately powerless landing-page agent: an embeddable React chat widget + a sandboxed proxy that answers only from digested docs.",
+  "packageManager": "pnpm@11.7.0",
+  "workspaces": [
+    "widget",
+    "server"
+  ],
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev:server": "pnpm --filter @concierge/server dev",
+    "dev:widget": "pnpm --filter @concierge/widget dev"
+  },
+  "license": "MIT"
+}

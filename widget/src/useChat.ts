@@ -1,0 +1,117 @@
+import { useCallback, useRef, useState } from "react";
+
+export interface Message {
+  role: "user" | "assistant";
+  content: string;
+}
+
+interface UseChatOpts {
+  endpoint: string;
+  pageId?: string;
+  greeting?: string;
+}
+
+/**
+ * Streaming chat against the Concierge server's /chat SSE endpoint.
+ * Keeps the whole transcript client-side; the server stays stateless.
+ */
+export function useChat({ endpoint, pageId, greeting }: UseChatOpts) {
+  const [messages, setMessages] = useState<Message[]>(
+    greeting ? [{ role: "assistant", content: greeting }] : []
+  );
+  const [busy, setBusy] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const send = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || busy) return;
+
+      const history: Message[] = [...messages, { role: "user", content: trimmed }];
+      // assistant placeholder we stream into
+      setMessages([...history, { role: "assistant", content: "" }]);
+      setBusy(true);
+
+      const ac = new AbortController();
+      abortRef.current = ac;
+
+      try {
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: ac.signal,
+          body: JSON.stringify({
+            pageId,
+            // only send real turns, not the greeting placeholder logic above
+            messages: history,
+          }),
+        });
+
+        if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        const pump = async (): Promise<void> => {
+          const { done, value } = await reader.read();
+          if (done) return;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            const t = line.trim();
+            if (!t.startsWith("data:")) continue;
+            const data = t.slice(5).trim();
+            if (data === "[DONE]") return;
+            try {
+              const json = JSON.parse(data);
+              if (json.delta) {
+                setMessages((prev) => {
+                  const next = [...prev];
+                  next[next.length - 1] = {
+                    role: "assistant",
+                    content: next[next.length - 1].content + json.delta,
+                  };
+                  return next;
+                });
+              } else if (json.error) {
+                setMessages((prev) => {
+                  const next = [...prev];
+                  next[next.length - 1] = { role: "assistant", content: json.error };
+                  return next;
+                });
+              }
+            } catch {
+              /* ignore partial frames */
+            }
+          }
+          return pump();
+        };
+        await pump();
+      } catch (err) {
+        if ((err as Error)?.name !== "AbortError") {
+          setMessages((prev) => {
+            const next = [...prev];
+            const last = next[next.length - 1];
+            if (last && last.role === "assistant" && last.content === "") {
+              next[next.length - 1] = {
+                role: "assistant",
+                content: "Sorry — I couldn't reach the server. Try again in a moment.",
+              };
+            }
+            return next;
+          });
+        }
+      } finally {
+        setBusy(false);
+        abortRef.current = null;
+      }
+    },
+    [messages, busy, endpoint, pageId]
+  );
+
+  const stop = useCallback(() => abortRef.current?.abort(), []);
+
+  return { messages, send, busy, stop };
+}

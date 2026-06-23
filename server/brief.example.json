@@ -1,0 +1,8 @@
+{
+  "brandName": "Tidepool",
+  "audience": "indie founders who want analytics without a data team",
+  "objective": "get them to start a free 14-day trial",
+  "tone": "confident, plain-spoken, a little playful",
+  "cta": "Start free trial",
+  "docs": "Tidepool is product analytics for small teams. It auto-instruments page views and clicks — no tracking plan required. Pricing: Free up to 10k events/mo; Pro is $29/mo for 1M events; no annual lock-in. It integrates with React, Vue, and plain HTML via a one-line snippet. Data is stored in the EU and is GDPR-friendly; you can self-host on request. There is no SQL required — dashboards are built by clicking. Support is email-only on Free, with a shared Slack on Pro. Tidepool does NOT do session replay or A/B testing today; those are on the roadmap for later this year. The free trial needs no credit card."
+}
