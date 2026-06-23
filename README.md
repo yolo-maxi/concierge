@@ -57,6 +57,32 @@ import { Concierge } from "@concierge/widget";
 
 The default style is a cool dark theme; everything is overridable via props and CSS variables.
 
+## Standalone embed (any static site)
+
+For non-React or plain static pages, the widget ships as a single self-mounting
+script. Drop one tag in and it bootstraps itself — no build step, no framework
+on the host page:
+
+```html
+<script
+  defer
+  src="https://your-host/embed.js"
+  data-endpoint="/concierge/chat"
+  data-brand-name="Frontier"
+  data-greeting="Ask me anything about Frontier."
+  data-suggestions="What is it?|What does it cost?|How do I try it?"
+  data-accent-color="#35d07a"
+  data-position="bottom-right"
+></script>
+```
+
+The server serves this bundle at `/embed.js` when `CONCIERGE_EMBED_FILE` points
+at the built `widget/dist/concierge-embed.js`, so the host page only needs the
+one tag and never has to host the asset itself. The conversation and open/closed
+state persist in `sessionStorage`, so the chat follows the visitor across
+same-origin page navigations. Markdown `[label](url)` and bare URLs in answers
+render as links.
+
 ## Page briefs
 
 A **brief** is the only thing that changes per page — and it doubles as the docs page's source of truth, so the two never drift:

@@ -2,17 +2,12 @@
  * Stateless conversation logging.
  *
  * Every completed turn is pushed to a Telegram chat, fire-and-forget. No DB,
- * no retention on the server. If the bot token is missing, logging silently
- * no-ops so local dev keeps working.
- *
- * The destination is HARDCODED: all concierge logs go to one place so they're
- * never mis-routed. The bot identity (token) is the only thing that comes from
- * the environment.
+ * no retention on the server. Logging is enabled only when both
+ * TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are set; otherwise it silently
+ * no-ops so local dev keeps working. Set TELEGRAM_THREAD_ID to target a
+ * specific forum topic. Pin these in the deployment env so logs always land
+ * in one place.
  */
-
-// Where every concierge conversation is logged. Always this chat + topic.
-const LOG_CHAT_ID = "-1003850294102";
-const LOG_THREAD_ID = 29273;
 
 // Stable emoji palette — a visitor's session always maps to the same emoji so
 // a single conversation is easy to follow when the topic gets crowded.
@@ -46,11 +41,11 @@ interface LogTurn {
 
 export async function logToTelegram(turn: LogTurn): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) return;
-  const chatId = process.env.TELEGRAM_CHAT_ID || LOG_CHAT_ID;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) return;
   const threadId = process.env.TELEGRAM_THREAD_ID
     ? Number(process.env.TELEGRAM_THREAD_ID)
-    : LOG_THREAD_ID;
+    : undefined;
 
   const emoji = emojiFor(turn.meta?.sessionId);
 
