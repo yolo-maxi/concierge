@@ -1,16 +1,20 @@
 /**
- * Stateless conversation logging.
+ * Stateless conversation logging via pluggable sinks.
  *
- * Every completed turn is pushed to a Telegram chat, fire-and-forget. No DB,
- * no retention on the server. Logging is enabled only when both
- * TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are set; otherwise it silently
- * no-ops so local dev keeps working. Set TELEGRAM_THREAD_ID to target a
- * specific forum topic. Pin these in the deployment env so logs always land
- * in one place.
+ * Each completed turn becomes a structured event that is fanned out to every
+ * configured sink, fire-and-forget. No DB, no retention on the server. If no
+ * sink is configured, logging silently no-ops so local dev keeps working.
+ *
+ * Built-in sinks (enable by env):
+ *   - webhook : POST the event as JSON to your own backend  (CONCIERGE_WEBHOOK_URL)
+ *   - telegram: push a formatted message to a chat/topic     (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID)
+ *   - console : write one JSON line to stdout                (CONCIERGE_LOG_CONSOLE=1)
+ *
+ * Adding your own sink is a few lines — push a function into SINKS below.
  */
 
 // Stable emoji palette — a visitor's session always maps to the same emoji so
-// a single conversation is easy to follow when the topic gets crowded.
+// a single conversation is easy to follow across turns.
 const SESSION_EMOJI = [
   "🦊", "🐙", "🦉", "🐝", "🦋", "🐳", "🦀", "🐢", "🦜", "🦝",
   "🐸", "🦔", "🦓", "🦌", "🐯", "🦒", "🐼", "🦅", "🦩", "🐺",
@@ -27,7 +31,7 @@ function emojiFor(sessionId?: string): string {
   return SESSION_EMOJI[h % SESSION_EMOJI.length];
 }
 
-interface LogTurn {
+export interface LogTurn {
   brandName: string;
   question: string;
   answer: string;
@@ -39,43 +43,85 @@ interface LogTurn {
   };
 }
 
-export async function logToTelegram(turn: LogTurn): Promise<void> {
+/** The normalized event every sink receives. */
+export interface ConciergeEvent {
+  type: "concierge.turn";
+  at: string;
+  brand: string;
+  pageId?: string;
+  pageUrl?: string;
+  sessionId?: string;
+  /** Stable per-session emoji (handy for grouping in a feed). */
+  emoji: string;
+  question: string;
+  answer: string;
+  ip?: string;
+}
+
+type Sink = (e: ConciergeEvent) => Promise<void>;
+
+/** POST the raw event JSON to your own backend. The simplest, most flexible sink. */
+const webhookSink: Sink = async (e) => {
+  const url = process.env.CONCIERGE_WEBHOOK_URL;
+  if (!url) return;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const secret = process.env.CONCIERGE_WEBHOOK_SECRET;
+  if (secret) headers["Authorization"] = `Bearer ${secret}`;
+  await fetch(url, { method: "POST", headers, body: JSON.stringify(e) });
+};
+
+/** One JSON line per turn on stdout — pipe it anywhere (files, vector, etc.). */
+const consoleSink: Sink = async (e) => {
+  if (process.env.CONCIERGE_LOG_CONSOLE !== "1") return;
+  console.log(JSON.stringify(e));
+};
+
+/** Formatted Telegram message to a chat/topic. */
+const telegramSink: Sink = async (e) => {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
   if (!token || !chatId) return;
-  const threadId = process.env.TELEGRAM_THREAD_ID
-    ? Number(process.env.TELEGRAM_THREAD_ID)
-    : undefined;
+  const threadId = process.env.TELEGRAM_THREAD_ID ? Number(process.env.TELEGRAM_THREAD_ID) : undefined;
 
-  const emoji = emojiFor(turn.meta?.sessionId);
-
-  // Always lead with WHICH PAGE the question came from, plus the session emoji.
-  const where = turn.meta?.pageId ? `${turn.brandName} · ${turn.meta.pageId}` : turn.brandName;
-  const header = `${emoji} <b>${escapeHtml(where)}</b>`;
-  const fromLine = turn.meta?.pageUrl ? `\n<i>from ${escapeHtml(turn.meta.pageUrl)}</i>` : "";
-
-  // The visitor's question goes in a blockquote so it's instantly clear what
-  // they wrote; the agent's reply follows underneath.
+  const where = e.pageId ? `${e.brand} · ${e.pageId}` : e.brand;
+  const header = `${e.emoji} <b>${escapeHtml(where)}</b>`;
+  const fromLine = e.pageUrl ? `\n<i>from ${escapeHtml(e.pageUrl)}</i>` : "";
   const text =
     `${header}${fromLine}\n` +
-    `<blockquote>${escapeHtml(turn.question)}</blockquote>\n` +
-    `${escapeHtml(turn.answer)}`;
+    `<blockquote>${escapeHtml(e.question)}</blockquote>\n` +
+    `${escapeHtml(e.answer)}`;
 
-  try {
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        message_thread_id: threadId,
-        text: text.slice(0, 4000),
-        parse_mode: "HTML",
-        disable_web_page_preview: true,
-      }),
-    });
-  } catch {
-    // logging must never break a reply
-  }
+  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      message_thread_id: threadId,
+      text: text.slice(0, 4000),
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+    }),
+  });
+};
+
+const SINKS: Sink[] = [webhookSink, telegramSink, consoleSink];
+
+export async function logConversation(turn: LogTurn): Promise<void> {
+  const event: ConciergeEvent = {
+    type: "concierge.turn",
+    at: new Date().toISOString(),
+    brand: turn.brandName,
+    pageId: turn.meta?.pageId,
+    pageUrl: turn.meta?.pageUrl,
+    sessionId: turn.meta?.sessionId,
+    emoji: emojiFor(turn.meta?.sessionId),
+    question: turn.question,
+    answer: turn.answer,
+    ip: turn.meta?.ip,
+  };
+  // Each sink is isolated — one failing (or being unconfigured) never affects
+  // the others, and logging never breaks a reply.
+  await Promise.allSettled(SINKS.map((sink) => sink(event)));
 }
 
 function escapeHtml(s: string): string {

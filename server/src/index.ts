@@ -3,7 +3,7 @@ import cors from "cors";
 import { buildSystemPrompt } from "./prompt.js";
 import { getBrief } from "./config.js";
 import { streamChat, veniceFromEnv, type ChatTurn } from "./venice.js";
-import { logToTelegram } from "./log.js";
+import { logConversation } from "./log.js";
 import type { ChatRequestBody, ChatMessage } from "./types.js";
 
 const PORT = Number(process.env.PORT || 8787);
@@ -105,7 +105,7 @@ app.post("/chat", async (req, res) => {
     res.end();
 
     // fire-and-forget log
-    void logToTelegram({
+    void logConversation({
       brandName: brief.brandName,
       question,
       answer: full,

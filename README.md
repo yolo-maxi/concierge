@@ -155,9 +155,33 @@ A **brief** is the only thing that changes per page. It's the agent's entire wor
 
 ---
 
-## Conversation logging (optional)
+## Conversation logging (optional, pluggable)
 
-Set `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` (and optionally `TELEGRAM_THREAD_ID` for a forum topic) and every completed turn is pushed to Telegram, fire-and-forget. Each log leads with which page the question came from and a stable per-session emoji so one visitor's thread is easy to follow. The server keeps no transcript of its own — it stays stateless. Unset the vars and logging silently no-ops.
+Each completed turn is normalized into one event and fanned out to every configured **sink**, fire-and-forget. Enable any combination; configure none and logging silently no-ops. The server keeps no transcript of its own — it stays stateless.
+
+```jsonc
+// the event every sink receives
+{
+  "type": "concierge.turn",
+  "at": "2026-06-24T00:29:47.299Z",
+  "brand": "Frontier",
+  "pageId": "frontier",
+  "pageUrl": "https://frontier.repo.box/",
+  "sessionId": "s_ab12…",
+  "emoji": "🛰️",            // stable per-session, handy for grouping
+  "question": "is it custodial?",
+  "answer": "No, Frontier is non-custodial. …",
+  "ip": "203.0.113.7"
+}
+```
+
+| Sink | Enable with | What it does |
+|---|---|---|
+| **Webhook** | `CONCIERGE_WEBHOOK_URL` (+ optional `CONCIERGE_WEBHOOK_SECRET`) | `POST`s the event as JSON to your backend. The secret is sent as `Authorization: Bearer <secret>`. The simplest, most flexible option — pipe it into your own DB/queue/analytics. |
+| **Console** | `CONCIERGE_LOG_CONSOLE=1` | Writes one JSON line per turn to stdout — pipe it to a file, vector, journald, etc. |
+| **Telegram** | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` (+ optional `TELEGRAM_THREAD_ID`) | Formatted message to a chat/forum topic, question in a blockquote, led by the page + session emoji. |
+
+Adding your own sink is a few lines — drop a `(event) => Promise<void>` into the `SINKS` array in `server/src/log.ts`.
 
 ## Server env
 
