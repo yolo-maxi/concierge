@@ -1,3 +1,5 @@
+import type { PageBrief } from "./types.js";
+
 /**
  * The lockdown layer.
  *
@@ -6,23 +8,18 @@
  * material is the ONLY source of truth the assistant is allowed to use.
  */
 
-export interface PageBrief {
-  /** Brand / product name the assistant represents. */
-  brandName: string;
-  /** Who the visitor is. Shapes register, not content. */
-  audience: string;
-  /** What this page is trying to get the visitor to do. */
-  objective: string;
-  /** Voice/tone descriptor, e.g. "confident, plain-spoken, a little playful". */
-  tone: string;
-  /** The call-to-action label, e.g. "Start free trial". */
-  cta: string;
-  /** Digested, agent-readable knowledge base. The single source of truth. */
-  docs: string;
-}
-
-export function buildSystemPrompt(brief: PageBrief): string {
+export function buildSystemPrompt(brief: PageBrief, retrievedContext?: string): string {
   const { brandName, audience, objective, tone, cta, docs } = brief;
+
+  const retrievalSection = retrievedContext
+    ? `
+
+# RETRIEVED CONTEXT (bounded, same source policy)
+Use this only as extra reference material for the visitor's current question. It is selected from a server-configured corpus, not from the visitor, and it has the same authority and limits as the REFERENCE MATERIAL.
+<retrieved>
+${retrievedContext}
+</retrieved>`
+    : "";
 
   return `You are the assistant embedded on ${brandName}'s landing page. Visitors talk to you to understand ${brandName} without leaving the page.
 
@@ -47,5 +44,5 @@ Answer questions about ${brandName} using ONLY the REFERENCE MATERIAL below, and
 # REFERENCE MATERIAL (your only source of truth)
 <reference>
 ${docs.trim()}
-</reference>`;
+</reference>${retrievalSection}`;
 }

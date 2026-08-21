@@ -13,3 +13,40 @@ export interface ChatRequestBody {
   /** URL of the page the question was asked from. Logged for context. */
   pageUrl?: string;
 }
+
+export interface RetrievalCapability {
+  source: "inline" | "url";
+  /** Inline corpus documents. Only used when source is "inline". */
+  docs?: string[];
+  /** Boot-time corpus URL. Only used when source is "url"; never fetched per request. */
+  url?: string;
+  /** Optional pre-split chunks. If omitted, docs/url content is chunked at boot. */
+  chunks?: string[];
+  /** Number of chunks to inject per turn. */
+  topK?: number;
+  /** Hard cap on total retrieved context injected into the prompt. */
+  maxInjectedChars?: number;
+}
+
+export interface BriefCapabilities {
+  retrieval?: RetrievalCapability;
+  /** Allowlist of server-defined tool names. */
+  tools?: string[];
+}
+
+export interface PageBrief {
+  /** Brand / product name the assistant represents. */
+  brandName: string;
+  /** Who the visitor is. Shapes register, not content. */
+  audience: string;
+  /** What this page is trying to get the visitor to do. */
+  objective: string;
+  /** Voice/tone descriptor, e.g. "confident, plain-spoken, a little playful". */
+  tone: string;
+  /** The call-to-action label, e.g. "Start free trial". */
+  cta: string;
+  /** Digested, agent-readable knowledge base. The default single source of truth. */
+  docs: string;
+  /** Optional server-side capability packs loaded only from CONCIERGE_BRIEF(S). */
+  capabilities?: BriefCapabilities;
+}

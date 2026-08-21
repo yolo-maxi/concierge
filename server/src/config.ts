@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import type { PageBrief } from "./prompt.js";
+import type { PageBrief } from "./types.js";
 
 /**
  * Loads page briefs. Two modes:
@@ -34,4 +34,9 @@ export function getBrief(pageId?: string): PageBrief {
     if (first) return first;
   }
   throw new Error(`No brief found for pageId="${pageId ?? "(none)"}"`);
+}
+
+export function getConfiguredBriefs(): PageBrief[] {
+  if (!single && !map) load();
+  return [...(single ? [single] : []), ...(map ? Object.values(map) : [])];
 }

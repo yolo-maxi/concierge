@@ -43,9 +43,7 @@ export interface LogTurn {
   };
 }
 
-/** The normalized event every sink receives. */
-export interface ConciergeEvent {
-  type: "concierge.turn";
+interface ConciergeBaseEvent {
   at: string;
   brand: string;
   pageId?: string;
@@ -53,10 +51,26 @@ export interface ConciergeEvent {
   sessionId?: string;
   /** Stable per-session emoji (handy for grouping in a feed). */
   emoji: string;
-  question: string;
-  answer: string;
   ip?: string;
 }
+
+/** The normalized conversation event every sink receives. */
+export interface ConciergeTurnEvent extends ConciergeBaseEvent {
+  type: "concierge.turn";
+  question: string;
+  answer: string;
+}
+
+export interface ConciergeToolCallEvent extends ConciergeBaseEvent {
+  type: "concierge.tool_call";
+  toolName: string;
+  args: Record<string, unknown>;
+  outcome: "ok" | "error" | "rate_limited" | "timeout" | "blocked";
+  durationMs: number;
+}
+
+/** The normalized event every sink receives. */
+export type ConciergeEvent = ConciergeTurnEvent | ConciergeToolCallEvent;
 
 type Sink = (e: ConciergeEvent) => Promise<void>;
 
@@ -87,9 +101,11 @@ const telegramSink: Sink = async (e) => {
   const header = `${e.emoji} <b>${escapeHtml(where)}</b>`;
   const fromLine = e.pageUrl ? `\n<i>from ${escapeHtml(e.pageUrl)}</i>` : "";
   const text =
-    `${header}${fromLine}\n` +
-    `<blockquote>${escapeHtml(e.question)}</blockquote>\n` +
-    `${escapeHtml(e.answer)}`;
+    e.type === "concierge.tool_call"
+      ? `${header} · <b>tool</b>${fromLine}\n<blockquote>${escapeHtml(e.toolName)}: ${escapeHtml(e.outcome)} (${e.durationMs}ms)</blockquote>`
+      : `${header}${fromLine}\n` +
+        `<blockquote>${escapeHtml(e.question)}</blockquote>\n` +
+        `${escapeHtml(e.answer)}`;
 
   await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
@@ -107,7 +123,7 @@ const telegramSink: Sink = async (e) => {
 const SINKS: Sink[] = [webhookSink, telegramSink, consoleSink];
 
 export async function logConversation(turn: LogTurn): Promise<void> {
-  const event: ConciergeEvent = {
+  const event: ConciergeTurnEvent = {
     type: "concierge.turn",
     at: new Date().toISOString(),
     brand: turn.brandName,
@@ -121,6 +137,31 @@ export async function logConversation(turn: LogTurn): Promise<void> {
   };
   // Each sink is isolated — one failing (or being unconfigured) never affects
   // the others, and logging never breaks a reply.
+  await Promise.allSettled(SINKS.map((sink) => sink(event)));
+}
+
+export async function logToolCall(input: {
+  brandName: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  outcome: ConciergeToolCallEvent["outcome"];
+  durationMs: number;
+  meta?: LogTurn["meta"];
+}): Promise<void> {
+  const event: ConciergeToolCallEvent = {
+    type: "concierge.tool_call",
+    at: new Date().toISOString(),
+    brand: input.brandName,
+    pageId: input.meta?.pageId,
+    pageUrl: input.meta?.pageUrl,
+    sessionId: input.meta?.sessionId,
+    emoji: emojiFor(input.meta?.sessionId),
+    ip: input.meta?.ip,
+    toolName: input.toolName,
+    args: input.args,
+    outcome: input.outcome,
+    durationMs: input.durationMs,
+  };
   await Promise.allSettled(SINKS.map((sink) => sink(event)));
 }
 
