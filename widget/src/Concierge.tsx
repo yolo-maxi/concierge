@@ -1,6 +1,16 @@
 import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useChat } from "./useChat";
 import { CSS } from "./styles";
+import {
+  THEME_PRESETS,
+  densityTokens,
+  deriveAccentTokens,
+  isThemePresetName,
+  scaleRadiusTokens,
+  type ThemePresetName,
+  type ThemeTokens,
+} from "./themes";
 
 // Render assistant text with clickable links: supports [label](url) markdown and
 // bare https URLs. Everything else stays literal text (no HTML injection).
@@ -69,8 +79,8 @@ export interface ConciergeProps {
   /** Start opened (ignored for inline, which is always open). */
   defaultOpen?: boolean;
 
-  /** Launcher style: a labelled "pill" (default) or a round "bubble". */
-  launcher?: "pill" | "bubble";
+  /** Launcher style. */
+  launcher?: "pill" | "bubble" | "bar" | "inline-input";
   /** Text on the pill launcher. Default "Ask AI". */
   launcherLabel?: string;
   /** Emoji to use as the launcher / header icon instead of the default spark. */
@@ -83,14 +93,24 @@ export interface ConciergeProps {
   /** Delay before the nudge appears, ms. Default 5000. */
   nudgeDelay?: number;
 
-  /** Visual preset. Default "midnight" (dark). */
-  theme?: "midnight" | "light";
+  /** Visual preset or a partial token bundle. Default "midnight" (dark). */
+  theme?: ThemePresetName | ThemeTokens;
   /** Primary accent color (drives gradient, buttons, user bubbles). */
   accentColor?: string;
   /** Secondary accent for the gradient. Defaults to a tint of accentColor. */
   accentColor2?: string;
   /** Override any --cc-* CSS variables. */
   themeVars?: Record<string, string>;
+  /** Isolate the widget in a shadow root. Default true. */
+  isolate?: boolean;
+  /** Multiplier applied to radius tokens. */
+  radiusScale?: number;
+  /** Density preset for spacing and typography. */
+  density?: "comfortable" | "compact";
+  /** Override the widget font family token. */
+  fontFamily?: string;
+  /** Header avatar: "emoji", an image URL, or "none". */
+  avatar?: "emoji" | "none" | string;
   /** Extra class + style on the root for deep overrides. */
   className?: string;
   style?: React.CSSProperties;
@@ -129,6 +149,11 @@ export function Concierge(props: ConciergeProps) {
     accentColor,
     accentColor2,
     themeVars,
+    isolate = true,
+    radiusScale,
+    density = "comfortable",
+    fontFamily,
+    avatar = "emoji",
     className = "",
     style,
     showCredit = true,
@@ -162,6 +187,8 @@ export function Concierge(props: ConciergeProps) {
   const { messages, send, busy } = useChat({ endpoint, pageId, greeting });
   const scrollRef = useRef<HTMLDivElement>(null);
   const styleInjected = useRef(false);
+  const shadowHostRef = useRef<HTMLDivElement>(null);
+  const [shadowMount, setShadowMount] = useState<HTMLDivElement | null>(null);
 
   // Proactive nudge: a teaser above the launcher, shown once per tab after a
   // short delay, only if the visitor hasn't already engaged.
@@ -189,8 +216,9 @@ export function Concierge(props: ConciergeProps) {
     }
   };
 
-  // inject stylesheet once
+  // inject stylesheet once for non-isolated mode
   useEffect(() => {
+    if (isolate) return;
     if (styleInjected.current) return;
     if (typeof document === "undefined") return;
     if (!document.getElementById("cc-styles")) {
@@ -200,23 +228,59 @@ export function Concierge(props: ConciergeProps) {
       document.head.appendChild(el);
     }
     styleInjected.current = true;
-  }, []);
+  }, [isolate]);
+
+  useEffect(() => {
+    if (!isolate || typeof document === "undefined") {
+      setShadowMount(null);
+      return;
+    }
+    const host = shadowHostRef.current;
+    if (!host) return;
+    const root = host.shadowRoot || host.attachShadow({ mode: "open" });
+    let styleEl = root.querySelector<HTMLStyleElement>("style[data-cc-styles]");
+    if (!styleEl) {
+      styleEl = document.createElement("style");
+      styleEl.dataset.ccStyles = "true";
+      styleEl.textContent = CSS;
+      root.appendChild(styleEl);
+    }
+    let mount = root.querySelector<HTMLDivElement>("[data-cc-shadow-mount]");
+    if (!mount) {
+      mount = document.createElement("div");
+      mount.dataset.ccShadowMount = "true";
+      root.appendChild(mount);
+    }
+    setShadowMount(mount);
+  }, [isolate]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, busy]);
 
+  const presetName = isThemePresetName(theme) ? theme : "midnight";
+  const presetTokens = THEME_PRESETS[presetName];
+  const themeObject = typeof theme === "object" && theme ? theme : {};
+  const tokenVars = {
+    ...presetTokens,
+    ...themeObject,
+    ...deriveAccentTokens(accentColor, accentColor2),
+  };
   const rootVars: React.CSSProperties = {
-    ...(accentColor ? ({ ["--cc-accent" as any]: accentColor } as React.CSSProperties) : {}),
-    ...(accentColor2 ? ({ ["--cc-accent-2" as any]: accentColor2 } as React.CSSProperties) : {}),
+    ...(tokenVars as React.CSSProperties),
+    ...(densityTokens(density) as React.CSSProperties),
+    ...(scaleRadiusTokens({ ...tokenVars, ...densityTokens(density) }, radiusScale) as React.CSSProperties),
+    ...(fontFamily ? ({ ["--cc-font-family" as any]: fontFamily } as React.CSSProperties) : {}),
     ...(themeVars as React.CSSProperties),
     ...style,
   };
 
   const icon = launcherIcon ? <span className="cc-emoji">{launcherIcon}</span> : <SparkIcon />;
-  const themeClass = theme === "light" ? "cc-theme-light" : "";
   const posClass = inline ? "cc-inline" : position === "bottom-left" ? "cc-bl" : "cc-br";
   const showChips = suggestions.length > 0 && messages.filter((m) => m.role === "user").length === 0;
+  const launcherClass = launcher === "bubble" ? "cc-circle" : launcher === "bar" ? "cc-bar" : launcher === "inline-input" ? "cc-inline-input" : "cc-pill";
+  const avatarUrl = avatar && avatar !== "emoji" && avatar !== "none" ? avatar : logoUrl;
+  const showAvatar = avatar !== "none";
 
   const submit = () => {
     const t = draft;
@@ -232,8 +296,8 @@ export function Concierge(props: ConciergeProps) {
     setOpen(true);
   };
 
-  return (
-    <div className={`cc-root ${posClass} ${themeClass} ${className}`} style={rootVars}>
+  const content = (
+    <div className={`cc-root ${posClass} ${className}`} style={rootVars}>
       {!inline && !open && (
         <div className="cc-launchwrap">
           {showNudge && nudge && (
@@ -252,30 +316,31 @@ export function Concierge(props: ConciergeProps) {
             </div>
           )}
           <button
-            className={`cc-launch ${launcher === "pill" ? "cc-pill" : "cc-circle"}`}
+            className={`cc-launch ${launcherClass}`}
+            part="launcher"
             aria-label={`Chat with ${brandName}`}
             onClick={openPanel}
           >
             <span className="cc-launch-ic">{icon}</span>
-            {launcher === "pill" && <span className="cc-launch-label">{launcherLabel}</span>}
+            {launcher !== "bubble" && <span className="cc-launch-label">{launcherLabel}</span>}
           </button>
         </div>
       )}
 
       {(inline || open) && (
-        <div className="cc-panel" role="dialog" aria-label={`${brandName} assistant`}>
+        <div className="cc-panel" part="panel" role="dialog" aria-label={`${brandName} assistant`}>
           <div className="cc-head">
-            {logoUrl ? (
+            {showAvatar && avatarUrl ? (
               <div className="cc-logo" style={{ background: "transparent", boxShadow: "none" }}>
-                <img src={logoUrl} alt="" style={{ width: "100%", height: "100%", borderRadius: "inherit", objectFit: "cover" }} />
+                <img className="cc-logo-img" src={avatarUrl} alt="" />
                 {online && <span className="cc-dot" />}
               </div>
-            ) : (
+            ) : showAvatar ? (
               <div className="cc-logo">
                 {launcherIcon ? <span className="cc-emoji">{launcherIcon}</span> : <SparkIcon />}
                 {online && <span className="cc-dot" />}
               </div>
-            )}
+            ) : null}
             <div className="cc-htext">
               <div className="cc-title">{brandName}</div>
               <div className="cc-sub">{tagline}</div>
@@ -341,6 +406,18 @@ export function Concierge(props: ConciergeProps) {
           {showCredit && <div className="cc-credit">{creditText}</div>}
         </div>
       )}
+    </div>
+  );
+
+  if (!isolate) return content;
+
+  return (
+    <div
+      ref={shadowHostRef}
+      data-cc-shadow-host
+      style={{ all: "initial", display: inline ? "block" : "block", width: inline ? "100%" : "0", height: inline ? "auto" : "0" }}
+    >
+      {shadowMount ? createPortal(content, shadowMount) : null}
     </div>
   );
 }

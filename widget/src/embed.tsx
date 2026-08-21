@@ -68,6 +68,11 @@ function readConfig(): ConciergeProps | null {
     theme: (d.theme as ConciergeProps["theme"]) || undefined,
     accentColor: d.accentColor,
     accentColor2: d.accentColor2,
+    isolate: d.isolate === undefined ? undefined : d.isolate !== "false",
+    radiusScale: d.radiusScale ? Number(d.radiusScale) : undefined,
+    density: (d.density as ConciergeProps["density"]) || undefined,
+    fontFamily: d.fontFamily,
+    avatar: d.avatar,
     showCredit: d.showCredit !== "false",
     creditText: d.creditText,
   };

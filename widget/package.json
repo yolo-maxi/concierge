@@ -13,11 +13,13 @@
       "require": "./dist/index.cjs"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "build": "tsup src/index.ts --format esm,cjs --dts --clean --external react && pnpm build:embed",
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean --external react --external react-dom && pnpm build:embed",
     "build:embed": "esbuild src/embed.tsx --bundle --format=iife --minify --target=es2019 --outfile=dist/concierge-embed.js",
-    "dev": "tsup src/index.ts --format esm,cjs --dts --watch --external react"
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch --external react --external react-dom"
   },
   "peerDependencies": {
     "react": ">=17",
@@ -25,6 +27,8 @@
   },
   "devDependencies": {
     "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.7",
+    "esbuild": "^0.25.12",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tsup": "^8.3.5",

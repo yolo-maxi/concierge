@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Concierge isolation check</title>
+    <style>
+      * {
+        all: revert;
+        font-family: "Comic Sans MS", cursive;
+        box-sizing: content-box;
+      }
+      button {
+        background: yellow !important;
+        color: red !important;
+        border: 12px dashed lime !important;
+        padding: 30px !important;
+        font-size: 32px !important;
+      }
+      div {
+        background: repeating-linear-gradient(45deg, magenta, magenta 8px, cyan 8px, cyan 16px) !important;
+        border: 10px solid orange !important;
+        color: purple !important;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Host page with aggressive global CSS</h1>
+    <p>The isolated Concierge embed should keep its tokenized styling inside the shadow root.</p>
+    <script
+      defer
+      src="../dist/concierge-embed.js"
+      data-endpoint="/concierge/chat"
+      data-brand-name="Concierge"
+      data-tagline="Shadow DOM smoke check"
+      data-greeting="This page is for static isolation checks."
+      data-suggestions="Does isolation work?|Can host CSS leak in?"
+      data-launcher="pill"
+      data-launcher-label="Ask Concierge"
+      data-nudge="The host page is trying to restyle every element."
+      data-nudge-delay="100"
+      data-position="bottom-right"
+      data-theme="midnight"
+    ></script>
+  </body>
+</html>
