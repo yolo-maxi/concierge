@@ -1,14 +1,18 @@
 import express from "express";
 import cors from "cors";
 import { buildSystemPrompt } from "./prompt.js";
-import { getBrief } from "./config.js";
-import { streamChat, veniceFromEnv, type ChatTurn } from "./venice.js";
+import { getBrief, getConfiguredBriefs } from "./config.js";
+import { preloadRetrievalIndexes, selectRetrievedContext } from "./retrieval.js";
+import { streamChat, streamChatWithToolCalls, veniceFromEnv, type ChatTurn, type ToolDefinition } from "./venice.js";
 import { logConversation } from "./log.js";
 import type { ChatRequestBody, ChatMessage } from "./types.js";
+import { getAllowedTools } from "./tools/registry.js";
+import { runAllowedTool, toolContext } from "./tools/executor.js";
 
 const PORT = Number(process.env.PORT || 8787);
 const MAX_MESSAGES = 24; // conversation depth cap
 const MAX_CHARS = 2000; // per-message input cap
+const MAX_TOOL_DEPTH = Number(process.env.CONCIERGE_TOOL_MAX_DEPTH || 2);
 
 const app = express();
 app.use(express.json({ limit: "256kb" }));
@@ -73,10 +77,21 @@ app.post("/chat", async (req, res) => {
     return;
   }
 
+  const retrievedContext = await selectRetrievedContext(brief, clean[clean.length - 1].content);
   const turns: ChatTurn[] = [
-    { role: "system", content: buildSystemPrompt(brief) },
+    { role: "system", content: buildSystemPrompt(brief, retrievedContext) },
     ...clean,
   ];
+  const allowedTools = getAllowedTools(brief.capabilities?.tools);
+  const toolMap = new Map(allowedTools.map((tool) => [tool.name, tool]));
+  const toolDefinitions: ToolDefinition[] = allowedTools.map((tool) => ({
+    type: "function",
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.schema,
+    },
+  }));
 
   // Server-Sent Events stream back to the widget.
   res.setHeader("Content-Type", "text/event-stream");
@@ -94,12 +109,60 @@ app.post("/chat", async (req, res) => {
   const question = clean[clean.length - 1].content;
 
   try {
-    const full = await streamChat(
-      veniceFromEnv(),
-      turns,
-      (delta) => res.write(`data: ${JSON.stringify({ delta })}\n\n`),
-      { signal: ac.signal }
-    );
+    const cfg = veniceFromEnv();
+    let full = "";
+    if (toolDefinitions.length === 0) {
+      full = await streamChat(
+        cfg,
+        turns,
+        (delta) => res.write(`data: ${JSON.stringify({ delta })}\n\n`),
+        { signal: ac.signal }
+      );
+    } else {
+      const ctx = toolContext({
+        brief,
+        ip,
+        pageId: body.pageId,
+        sessionId: typeof body.sessionId === "string" ? body.sessionId.slice(0, 64) : undefined,
+        pageUrl: typeof body.pageUrl === "string" ? body.pageUrl.slice(0, 300) : undefined,
+      });
+      for (let depth = 0; depth <= MAX_TOOL_DEPTH; depth++) {
+        const result = await streamChatWithToolCalls(
+          cfg,
+          turns,
+          (delta) => res.write(`data: ${JSON.stringify({ delta })}\n\n`),
+          { signal: ac.signal, tools: toolDefinitions }
+        );
+        full += result.content;
+        if (result.toolCalls.length === 0) break;
+        if (depth === MAX_TOOL_DEPTH) {
+          const fallback = full
+            ? "\n\nI can keep helping from the information on this page."
+            : "I can keep helping from the information on this page.";
+          full += fallback;
+          res.write(`data: ${JSON.stringify({ delta: fallback })}\n\n`);
+          break;
+        }
+
+        turns.push({ role: "assistant", content: result.content, tool_calls: result.toolCalls });
+        for (const call of result.toolCalls) {
+          const toolResult = await runAllowedTool(
+            {
+              id: call.id,
+              name: call.function.name,
+              arguments: call.function.arguments,
+            },
+            toolMap,
+            ctx
+          );
+          turns.push({
+            role: "tool",
+            tool_call_id: toolResult.id,
+            content: toolResult.content,
+          });
+        }
+      }
+    }
     finished = true;
     res.write("data: [DONE]\n\n");
     res.end();
@@ -128,6 +191,10 @@ app.post("/chat", async (req, res) => {
     console.error("[concierge] chat error:", msg);
   }
 });
+
+if (process.env.CONCIERGE_BRIEF || process.env.CONCIERGE_BRIEFS) {
+  await preloadRetrievalIndexes(getConfiguredBriefs());
+}
 
 app.listen(PORT, () => {
   console.log(`🪸 concierge server on :${PORT}`);

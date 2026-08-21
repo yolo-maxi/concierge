@@ -246,6 +246,67 @@ A **brief** is the only thing that changes per page. It's the agent's entire wor
 
 ---
 
+## Optional capability packs
+
+Concierge is powerless by default. With no `capabilities` block in the server-loaded brief, prompt assembly and chat behaviour stay on the original code path: no retrieval, no tools, no memory, no action surface. Every capability you add is a door you opened, so configure them only from trusted server-side brief JSON loaded via `CONCIERGE_BRIEF` or `CONCIERGE_BRIEFS`. The client `/chat` body cannot enable, inject, or modify capabilities; the server still strips client `system` messages and ignores capability-shaped request fields.
+
+```jsonc
+{
+  "brandName": "Frontier",
+  "audience": "...",
+  "objective": "...",
+  "tone": "...",
+  "cta": "...",
+  "docs": "Small digested brief remains the baseline source of truth.",
+  "capabilities": {
+    "retrieval": {
+      "source": "inline",              // "inline" or "url"
+      "docs": ["larger corpus text"],  // inline only
+      "url": "https://example.com/corpus.txt", // url only; fetched once at boot
+      "chunks": ["optional pre-split chunk"],
+      "topK": 3,
+      "maxInjectedChars": 4000
+    },
+    "tools": ["capture_lead", "handoff_human"]
+  }
+}
+```
+
+### Retrieval pack
+
+`capabilities.retrieval` adds a larger configured corpus beside the small hand-digested brief. `source: "inline"` reads `docs` or `chunks` from the brief. `source: "url"` fetches `url` once when configured briefs are loaded at server start, then serves only that cached corpus; it never browses or fetches per visitor request. The server chunks text locally and ranks chunks by simple token overlap, injects at most `topK` matches, and enforces `maxInjectedChars` as a hard cap (default `4000`).
+
+Threat model: if an attacker prompt-injects the model with retrieval enabled, they may coax it to quote or misuse more of the configured corpus than the small brief exposed. Mitigations: retrieval can only select from the configured corpus, no live network access happens per request, injected context is bounded by `maxInjectedChars`, and the system prompt still forbids bulk dumps and off-topic answers.
+
+### Tool pack
+
+`capabilities.tools` is an allowlist of server-defined handlers. It is not arbitrary function calling, user code, or tool names from the browser. The model sees only the name, description, and JSON schema for tools allowlisted by the brief.
+
+Built-in tools:
+
+| Tool | Args | Behaviour |
+|---|---|---|
+| `capture_lead` | `{ "name"?: string, "email": string, "message"?: string }` | Validates the email, POSTs `{ brand, pageId, pageUrl, sessionId, lead }` to `CONCIERGE_LEAD_WEBHOOK_URL`, sends `Authorization: Bearer <CONCIERGE_LEAD_WEBHOOK_SECRET>` if configured, and returns a visitor-safe confirmation. |
+| `handoff_human` | `{ "reason"?: string }` | Emits a high-priority tool event through the existing sink fan-out, so console/webhook/Telegram receive it, and acknowledges the handoff to the visitor. |
+
+Threat model: if an attacker prompt-injects the model with tools enabled, they may cause allowed side effects such as sending bogus leads or paging a human. Mitigations: tools are allowlisted per brief, arguments are validated and sanitized before logging, each tool has its own rate limit on top of the per-IP chat limit, each call has a timeout, loop depth is capped, and failures return safe plain text rather than stack traces or internal details.
+
+To add another tool, create one file in `server/src/tools/` exporting a `ConciergeTool`, then add it to `ALL_TOOLS` in `server/src/tools/registry.ts`. A brief still must explicitly allowlist the new name before the model can see or call it.
+
+New env vars:
+
+| Env var | Default | What it does |
+|---|---|---|
+| `CONCIERGE_TOOL_RATE_LIMIT` | `5` | Per-IP, per-brand, per-tool calls per minute. |
+| `CONCIERGE_TOOL_MAX_DEPTH` | `2` | Maximum tool-call loop depth per turn. |
+| `CONCIERGE_TOOL_TIMEOUT_MS` | `5000` | Per-tool execution timeout. |
+| `CONCIERGE_LEAD_WEBHOOK_URL` | unset | Destination for `capture_lead`; if unset, the tool degrades to a safe text acknowledgement. |
+| `CONCIERGE_LEAD_WEBHOOK_SECRET` | unset | Optional bearer token sent only to the lead webhook. |
+
+Tool calls emit `concierge.tool_call` events to the same sinks as turns. Events include tool name, sanitized args, outcome, and duration; secrets and raw credentials are never included.
+
+---
+
 ## Conversation logging (optional, pluggable)
 
 Each completed turn is normalized into one event and fanned out to every configured **sink**, fire-and-forget. Enable any combination; configure none and logging silently no-ops. The server keeps no transcript of its own — it stays stateless.

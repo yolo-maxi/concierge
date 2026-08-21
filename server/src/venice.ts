@@ -10,8 +10,33 @@ export interface VeniceConfig {
 }
 
 export interface ChatTurn {
-  role: "system" | "user" | "assistant";
+  role: "system" | "user" | "assistant" | "tool";
   content: string;
+  tool_call_id?: string;
+  tool_calls?: ToolCall[];
+}
+
+export interface ToolCall {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
+export interface ToolDefinition {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+export interface StreamChatResult {
+  content: string;
+  toolCalls: ToolCall[];
 }
 
 export function veniceFromEnv(): VeniceConfig {
@@ -34,6 +59,16 @@ export async function streamChat(
   onDelta: (text: string) => void,
   opts: { signal?: AbortSignal; temperature?: number; maxTokens?: number } = {}
 ): Promise<string> {
+  const result = await streamChatWithToolCalls(cfg, messages, onDelta, opts);
+  return result.content;
+}
+
+export async function streamChatWithToolCalls(
+  cfg: VeniceConfig,
+  messages: ChatTurn[],
+  onDelta: (text: string) => void,
+  opts: { signal?: AbortSignal; temperature?: number; maxTokens?: number; tools?: ToolDefinition[] } = {}
+): Promise<StreamChatResult> {
   const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
@@ -47,6 +82,8 @@ export async function streamChat(
       temperature: opts.temperature ?? 0.3,
       max_tokens: opts.maxTokens ?? 600,
       messages,
+      tools: opts.tools && opts.tools.length > 0 ? opts.tools : undefined,
+      tool_choice: opts.tools && opts.tools.length > 0 ? "auto" : undefined,
       // Keep replies snappy: this model "thinks" by default, which adds
       // latency and tokens we don't want for a landing-page concierge.
       venice_parameters: { disable_thinking: true, strip_thinking_response: true },
@@ -62,6 +99,7 @@ export async function streamChat(
   const decoder = new TextDecoder();
   let buffer = "";
   let full = "";
+  const toolCalls = new Map<number, ToolCall>();
 
   while (true) {
     const { done, value } = await reader.read();
@@ -75,7 +113,7 @@ export async function streamChat(
       const trimmed = line.trim();
       if (!trimmed.startsWith("data:")) continue;
       const data = trimmed.slice(5).trim();
-      if (data === "[DONE]") return full;
+      if (data === "[DONE]") return { content: full, toolCalls: [...toolCalls.values()] };
       try {
         const json = JSON.parse(data);
         const delta = json.choices?.[0]?.delta?.content;
@@ -83,10 +121,24 @@ export async function streamChat(
           full += delta;
           onDelta(delta);
         }
+        for (const item of json.choices?.[0]?.delta?.tool_calls ?? []) {
+          const index = Number(item.index ?? 0);
+          const existing =
+            toolCalls.get(index) ??
+            {
+              id: item.id || `tool_${index}`,
+              type: "function" as const,
+              function: { name: "", arguments: "" },
+            };
+          if (item.id) existing.id = item.id;
+          if (item.function?.name) existing.function.name += item.function.name;
+          if (item.function?.arguments) existing.function.arguments += item.function.arguments;
+          toolCalls.set(index, existing);
+        }
       } catch {
         // ignore keep-alive / partial frames
       }
     }
   }
-  return full;
+  return { content: full, toolCalls: [...toolCalls.values()] };
 }
