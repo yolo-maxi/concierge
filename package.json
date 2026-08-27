@@ -10,6 +10,8 @@
   ],
   "scripts": {
     "build": "pnpm -r build",
+    "lint": "pnpm --filter @concierge/server lint",
+    "test": "pnpm --filter @concierge/server test",
     "dev:server": "pnpm --filter @concierge/server dev",
     "dev:widget": "pnpm --filter @concierge/widget dev"
   },

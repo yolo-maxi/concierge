@@ -241,8 +241,42 @@ A **brief** is the only thing that changes per page. It's the agent's entire wor
 
 - **Single page:** point `CONCIERGE_BRIEF` at one brief JSON.
 - **Multi page:** point `CONCIERGE_BRIEFS` at a `{ [pageId]: brief }` map; the widget selects with `pageId` / `data-page-id`.
+- **Reusable packet:** point `CONCIERGE_PACKET` at a versioned manifest containing a page map and optional provider metadata.
 
 **Tips for a good brief:** write `docs` as tight, factual prose (a few hundred words). State what the product *doesn't* do, so the agent refuses confidently. Add a `LINKS:` block of real URLs — the prompt lets it share links but only ones present verbatim in the brief.
+
+### Reusable Concierge packets
+
+For packaging a Concierge configuration with multiple page briefs, use the versioned packet manifest. It is server-side configuration only: the browser still sends only the page id, transcript, session id, and page URL. The server validates `manifestVersion: 1`, selects the requested `pages[pageId]`, or falls back to `defaultPageId` when the page id is absent or unknown.
+
+```jsonc
+{
+  "manifestVersion": 1,
+  "name": "tidepool-concierge",
+  "defaultPageId": "home",
+  "provider": {
+    "type": "venice",
+    "model": "deepseek-v4-flash",
+    "baseUrl": "https://api.venice.ai/api/v1"
+  },
+  "pages": {
+    "home": {
+      "brandName": "Tidepool",
+      "audience": "indie founders",
+      "objective": "start a trial",
+      "tone": "plain",
+      "cta": "Start free trial",
+      "docs": "Everything the assistant may know for this page."
+    }
+  }
+}
+```
+
+The packet `provider` block is descriptive and versioned with the manifest. Runtime credentials still come from environment variables; do not put API keys or webhook secrets in packet JSON.
+
+### Provider adapter
+
+Server-side model access now goes through a typed provider abstraction in `server/src/providers`. `CONCIERGE_PROVIDER` defaults to `venice`, and Venice remains the only supported adapter. That preserves the existing `VENICE_API_KEY`, `VENICE_BASE_URL`, and `VENICE_MODEL` behavior while leaving a narrow interface for future OpenAI-compatible providers. OAuth and local-agent credential paths are intentionally unsupported.
 
 ---
 

@@ -1,9 +1,9 @@
 import express from "express";
 import cors from "cors";
 import { buildSystemPrompt } from "./prompt.js";
-import { getBrief, getConfiguredBriefs } from "./config.js";
+import { getBrief, getConfiguredBriefs, getConfiguredProviderDefaults } from "./config.js";
 import { preloadRetrievalIndexes, selectRetrievedContext } from "./retrieval.js";
-import { streamChat, streamChatWithToolCalls, veniceFromEnv, type ChatTurn, type ToolDefinition } from "./venice.js";
+import { chatProviderFromEnv, type ChatTurn, type ToolDefinition } from "./providers/index.js";
 import { logConversation } from "./log.js";
 import type { ChatRequestBody, ChatMessage } from "./types.js";
 import { getAllowedTools } from "./tools/registry.js";
@@ -109,11 +109,10 @@ app.post("/chat", async (req, res) => {
   const question = clean[clean.length - 1].content;
 
   try {
-    const cfg = veniceFromEnv();
+    const provider = chatProviderFromEnv(process.env, getConfiguredProviderDefaults());
     let full = "";
     if (toolDefinitions.length === 0) {
-      full = await streamChat(
-        cfg,
+      full = await provider.streamChat(
         turns,
         (delta) => res.write(`data: ${JSON.stringify({ delta })}\n\n`),
         { signal: ac.signal }
@@ -127,8 +126,7 @@ app.post("/chat", async (req, res) => {
         pageUrl: typeof body.pageUrl === "string" ? body.pageUrl.slice(0, 300) : undefined,
       });
       for (let depth = 0; depth <= MAX_TOOL_DEPTH; depth++) {
-        const result = await streamChatWithToolCalls(
-          cfg,
+        const result = await provider.streamChatWithToolCalls(
           turns,
           (delta) => res.write(`data: ${JSON.stringify({ delta })}\n\n`),
           { signal: ac.signal, tools: toolDefinitions }

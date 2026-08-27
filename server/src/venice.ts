@@ -1,144 +1,40 @@
 /**
- * Minimal OpenAI-compatible streaming client, pointed at Venice.
- * No SDK dependency — just fetch + SSE parsing.
+ * Compatibility exports for the original Venice module path.
+ * New code should depend on server-side provider abstractions in ./providers.
  */
 
-export interface VeniceConfig {
-  baseUrl: string;
-  apiKey: string;
-  model: string;
-}
+import { createOpenAiCompatibleProvider, streamChatWithToolCalls as streamOpenAiCompatible } from "./providers/openAiCompatible.js";
+import { veniceConfigFromEnv } from "./providers/venice.js";
+import type {
+  ChatProviderConfig,
+  ChatTurn,
+  StreamChatOptions,
+  StreamChatResult,
+  ToolCall,
+  ToolDefinition,
+} from "./providers/index.js";
 
-export interface ChatTurn {
-  role: "system" | "user" | "assistant" | "tool";
-  content: string;
-  tool_call_id?: string;
-  tool_calls?: ToolCall[];
-}
-
-export interface ToolCall {
-  id: string;
-  type: "function";
-  function: {
-    name: string;
-    arguments: string;
-  };
-}
-
-export interface ToolDefinition {
-  type: "function";
-  function: {
-    name: string;
-    description: string;
-    parameters: Record<string, unknown>;
-  };
-}
-
-export interface StreamChatResult {
-  content: string;
-  toolCalls: ToolCall[];
-}
+export type VeniceConfig = ChatProviderConfig;
+export type { ChatTurn, StreamChatOptions, StreamChatResult, ToolCall, ToolDefinition };
 
 export function veniceFromEnv(): VeniceConfig {
-  const apiKey = process.env.VENICE_API_KEY;
-  if (!apiKey) throw new Error("VENICE_API_KEY is not set");
-  return {
-    baseUrl: process.env.VENICE_BASE_URL || "https://api.venice.ai/api/v1",
-    apiKey,
-    model: process.env.VENICE_MODEL || "deepseek-v4-flash",
-  };
+  return veniceConfigFromEnv();
 }
 
-/**
- * Streams completion token deltas. Calls onDelta for each chunk of text.
- * Returns the full accumulated text once the stream ends.
- */
 export async function streamChat(
   cfg: VeniceConfig,
   messages: ChatTurn[],
   onDelta: (text: string) => void,
-  opts: { signal?: AbortSignal; temperature?: number; maxTokens?: number } = {}
+  opts: Omit<StreamChatOptions, "tools"> = {}
 ): Promise<string> {
-  const result = await streamChatWithToolCalls(cfg, messages, onDelta, opts);
-  return result.content;
+  return createOpenAiCompatibleProvider(cfg).streamChat(messages, onDelta, opts);
 }
 
 export async function streamChatWithToolCalls(
   cfg: VeniceConfig,
   messages: ChatTurn[],
   onDelta: (text: string) => void,
-  opts: { signal?: AbortSignal; temperature?: number; maxTokens?: number; tools?: ToolDefinition[] } = {}
+  opts: StreamChatOptions = {}
 ): Promise<StreamChatResult> {
-  const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${cfg.apiKey}`,
-    },
-    signal: opts.signal,
-    body: JSON.stringify({
-      model: cfg.model,
-      stream: true,
-      temperature: opts.temperature ?? 0.3,
-      max_tokens: opts.maxTokens ?? 600,
-      messages,
-      tools: opts.tools && opts.tools.length > 0 ? opts.tools : undefined,
-      tool_choice: opts.tools && opts.tools.length > 0 ? "auto" : undefined,
-      // Keep replies snappy: this model "thinks" by default, which adds
-      // latency and tokens we don't want for a landing-page concierge.
-      venice_parameters: { disable_thinking: true, strip_thinking_response: true },
-    }),
-  });
-
-  if (!res.ok || !res.body) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Venice error ${res.status}: ${detail.slice(0, 300)}`);
-  }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let full = "";
-  const toolCalls = new Map<number, ToolCall>();
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("data:")) continue;
-      const data = trimmed.slice(5).trim();
-      if (data === "[DONE]") return { content: full, toolCalls: [...toolCalls.values()] };
-      try {
-        const json = JSON.parse(data);
-        const delta = json.choices?.[0]?.delta?.content;
-        if (delta) {
-          full += delta;
-          onDelta(delta);
-        }
-        for (const item of json.choices?.[0]?.delta?.tool_calls ?? []) {
-          const index = Number(item.index ?? 0);
-          const existing =
-            toolCalls.get(index) ??
-            {
-              id: item.id || `tool_${index}`,
-              type: "function" as const,
-              function: { name: "", arguments: "" },
-            };
-          if (item.id) existing.id = item.id;
-          if (item.function?.name) existing.function.name += item.function.name;
-          if (item.function?.arguments) existing.function.arguments += item.function.arguments;
-          toolCalls.set(index, existing);
-        }
-      } catch {
-        // ignore keep-alive / partial frames
-      }
-    }
-  }
-  return { content: full, toolCalls: [...toolCalls.values()] };
+  return streamOpenAiCompatible(cfg, messages, onDelta, opts);
 }
