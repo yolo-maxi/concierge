@@ -9,3 +9,4 @@ pnpm-lock.yaml.bak
 # client-specific briefs (keep brief.example.json only)
 server/*.brief.json
 server/frontier.brief.json
+dist-deploy/

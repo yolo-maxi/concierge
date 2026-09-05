@@ -15,5 +15,8 @@
     "dev:server": "pnpm --filter @concierge/server dev",
     "dev:widget": "pnpm --filter @concierge/widget dev"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.25.12"
+  }
 }
