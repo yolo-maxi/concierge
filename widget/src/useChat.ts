@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isUiEvent, type UiEvent } from "./ui/UiBlock";
 
 export interface Message {
   role: "user" | "assistant";
   content: string;
+  /**
+   * Components the server rendered during this turn. Text always remains the
+   * primary content: a UI event carries its own sentence, so a transcript
+   * restored by an older build still reads correctly.
+   */
+  ui?: UiEvent[];
 }
 
 interface UseChatOpts {
@@ -39,9 +46,14 @@ function restore(greeting?: string): Message[] {
       const raw = window.sessionStorage.getItem(TRANSCRIPT_KEY);
       if (raw) {
         const saved = JSON.parse(raw) as Message[];
-        // Drop a trailing empty assistant turn (an interrupted stream).
+        // Drop a trailing empty assistant turn (an interrupted stream) — but a
+        // turn that rendered a component is not empty even with no prose, so
+        // keep those.
         const clean = saved.filter(
-          (m) => m && typeof m.content === "string" && (m.content !== "" || m.role === "user")
+          (m) =>
+            m &&
+            typeof m.content === "string" &&
+            (m.content !== "" || m.role === "user" || (Array.isArray(m.ui) && m.ui.length > 0))
         );
         if (clean.length) return clean;
       }
@@ -124,8 +136,20 @@ export function useChat({ endpoint, pageId, greeting }: UseChatOpts) {
                 setMessages((prev) => {
                   const next = [...prev];
                   next[next.length - 1] = {
+                    ...next[next.length - 1],
                     role: "assistant",
                     content: next[next.length - 1].content + json.delta,
+                  };
+                  return next;
+                });
+              } else if (json.ui && isUiEvent(json.ui)) {
+                setMessages((prev) => {
+                  const next = [...prev];
+                  const last = next[next.length - 1];
+                  next[next.length - 1] = {
+                    ...last,
+                    role: "assistant",
+                    ui: [...(last.ui || []), json.ui as UiEvent],
                   };
                   return next;
                 });

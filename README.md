@@ -357,6 +357,39 @@ New env vars:
 | `CONCIERGE_LEAD_WEBHOOK_URL` | unset | Destination for `capture_lead`; if unset, the tool degrades to a safe text acknowledgement. |
 | `CONCIERGE_LEAD_WEBHOOK_SECRET` | unset | Optional bearer token sent only to the lead webhook. |
 
+#### Generative UI (`capabilities.ui`)
+
+Off by default. Set `"ui": true` in a brief's `capabilities` block and the model gains one extra server-owned tool, `render_ui`, which shows the visitor a registered component.
+
+```json
+"capabilities": { "tools": ["capture_lead"], "ui": true }
+```
+
+The model never emits markup. It picks a **registered component name** and a **validated prop bundle**; the server turns that into a typed `ui` frame on the SSE stream and the widget renders it with its own React components. No JSX, HTML, CSS or JavaScript crosses the wire, so a prompt-injected model cannot render anything the widget does not already implement.
+
+| Component | Required props | Purpose |
+|---|---|---|
+| `button_group` | `buttons` (1–4 × `{ label, action }`) | A small set of suggested next steps. |
+| `lead_form` | `fields` (1–5 × `{ name, label, type?, required?, placeholder? }`) | Short contact form; `type` is one of `text\|email\|tel\|textarea`. |
+| `product_card` | `name` | One product/plan, with optional `description`, `price`, `imageUrl`, `action`. |
+| `handoff_card` | — | Route to a human: `title`, `body`, `action`. |
+
+Actions are one of `{ kind: "send", text }` (sends a user turn when clicked), `{ kind: "link", url }` (http/https only), or `{ kind: "tool", tool, label? }`. A `tool` action **does not invoke a tool**: the widget has no path to the executor. Clicking sends a message, the model decides, and the executor still applies the allowlist, per-tool rate limit and side-effect confirmation gate. A `tool` action naming something outside `capabilities.tools` is rejected at validation.
+
+What the validator refuses, in every case producing no event at all:
+
+- an unregistered component name, or any prop not declared for that component
+- a prop of the wrong type (types are never coerced), or an enum value outside its set
+- any URL whose scheme is not `http:`/`https:` — `javascript:`, `data:`, `vbscript:`, `file:` and scheme-relative forms are refused rather than normalised
+- an array over its declared cap, or an empty required array
+- a missing `text` fallback
+
+`text` is mandatory on every event: it is the plain sentence shown when the component cannot render. That is what lets an older embed sit safely in front of a newer server — an unknown component degrades to its sentence rather than to a blank space. The fallback also joins the server-side transcript, so logs are not silently missing what the visitor was shown.
+
+A rejected component is not an error: the model is told what was wrong and continues in prose. Styling is token-only — components use the same `--cc-*` variables as the rest of the widget, so presets and `themeVars` restyle them automatically.
+
+To add a component, declare its prop shape in `UI_COMPONENTS` (`server/src/ui/protocol.ts`) and implement the matching renderer in `widget/src/ui/UiBlock.tsx`. Both sides are required: a component the server allows but the widget does not implement falls back to text.
+
 Tool calls emit `concierge.tool_call` events to the same sinks as turns. Events include tool name, sanitized args, outcome, and duration; secrets and raw credentials are never included.
 
 ---

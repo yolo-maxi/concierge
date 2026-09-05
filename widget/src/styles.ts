@@ -131,6 +131,41 @@ export const CSS = `
 .cc-credit b { color: var(--cc-credit-accent); font-weight: var(--cc-font-weight-link); }
 .cc-avatar-none { display: none; }
 
+/* Generative UI components. Token-only: every colour, radius, spacing and
+   duration below is an existing --cc-* variable, so a preset or themeVars
+   override restyles components exactly as it restyles bubbles. */
+.cc-msg.cc-ui-msg { max-width: 100%; width: 100%; padding: 0; background: none; border: none; }
+.cc-ui { display: flex; flex-direction: column; gap: calc(var(--cc-space-unit) * 2);
+  background: var(--cc-bubble-agent-bg); color: var(--cc-bubble-agent-text);
+  border: var(--cc-border-width) solid var(--cc-border); border-radius: var(--cc-radius-bubble);
+  padding: calc(var(--cc-space-unit) * 3); }
+.cc-ui-fallback { margin: 0; white-space: pre-wrap; }
+.cc-ui-title { margin: 0; font-weight: var(--cc-font-weight-title); line-height: var(--cc-line-height-title); }
+.cc-ui-desc { margin: 0; color: var(--cc-text-muted); line-height: var(--cc-line-height); }
+.cc-ui-price { margin: 0; font-weight: var(--cc-font-weight-title); color: var(--cc-accent); }
+.cc-ui-btn-row { display: flex; flex-wrap: wrap; gap: calc(var(--cc-space-unit) * 1.75); }
+.cc-ui-btn { font-family: inherit; font-size: var(--cc-font-size-chip); cursor: pointer;
+  padding: calc(var(--cc-space-unit) * 2) calc(var(--cc-space-unit) * 3);
+  border-radius: var(--cc-radius-launcher); color: var(--cc-text);
+  background: var(--cc-surface-raised); border: var(--cc-border-width) solid var(--cc-border);
+  text-decoration: none; display: inline-block;
+  transition: border-color var(--cc-motion-duration), background var(--cc-motion-duration); }
+.cc-ui-btn:not(:disabled):hover { border-color: var(--cc-accent); background: var(--cc-chip-hover-bg); }
+.cc-ui-btn:disabled { opacity: .4; cursor: default; }
+.cc-ui-btn:focus-visible { outline: none; border-color: var(--cc-accent); box-shadow: var(--cc-focus); }
+.cc-ui-btn-primary { background: var(--cc-send-bg); color: var(--cc-accent-ink); border-color: transparent; }
+.cc-ui-field { display: flex; flex-direction: column; gap: var(--cc-space-unit); }
+.cc-ui-field label { font-size: var(--cc-font-size-credit); color: var(--cc-text-muted); }
+.cc-ui-field input, .cc-ui-field textarea { font-family: inherit; font-size: var(--cc-font-size);
+  color: var(--cc-text); background: var(--cc-surface); border: var(--cc-border-width) solid var(--cc-border);
+  border-radius: var(--cc-radius-control); padding: calc(var(--cc-space-unit) * 2) calc(var(--cc-space-unit) * 2.5);
+  outline: none; resize: vertical; line-height: var(--cc-line-height); width: 100%; box-sizing: border-box; }
+.cc-ui-field input:focus, .cc-ui-field textarea:focus { border-color: var(--cc-accent); box-shadow: var(--cc-focus); }
+.cc-ui-card { flex-direction: column; padding: 0; overflow: hidden; }
+.cc-ui-card-img { width: 100%; height: auto; display: block; }
+.cc-ui-card-body { display: flex; flex-direction: column; gap: calc(var(--cc-space-unit) * 1.5);
+  padding: calc(var(--cc-space-unit) * 3); align-items: flex-start; }
+
 @media (prefers-reduced-motion: reduce) {
   .cc-launch, .cc-nudge, .cc-panel, .cc-msg { animation: none !important; }
   .cc-launch::after { animation: none !important; }

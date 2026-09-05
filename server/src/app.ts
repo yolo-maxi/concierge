@@ -8,6 +8,7 @@ import { logConversation } from "./log.js";
 import type { ChatRequestBody, ChatMessage } from "./types.js";
 import { getAllowedTools } from "./tools/registry.js";
 import { runAllowedTool, toolContext, toolParameterSchema } from "./tools/executor.js";
+import { handleUiCall, uiToolDefinition, UI_TOOL_NAME } from "./ui/tool.js";
 import {
   createRuntime,
   enforceRateLimits,
@@ -107,6 +108,7 @@ export function createConciergeApp(options: ConciergeAppOptions = {}) {
     ];
     const allowedTools = getAllowedTools(brief.capabilities?.tools);
     const toolMap = new Map(allowedTools.map((tool) => [tool.name, tool]));
+    const allowedToolNames = allowedTools.map((tool) => tool.name);
     const toolDefinitions: ToolDefinition[] = allowedTools.map((tool) => ({
       type: "function",
       function: {
@@ -115,6 +117,11 @@ export function createConciergeApp(options: ConciergeAppOptions = {}) {
         parameters: toolParameterSchema(tool),
       },
     }));
+    // Generative UI is opt-in per page. When it is off, render_ui is not
+    // advertised at all, so the model has no name to call and the stream
+    // carries text and tool results only.
+    const uiEnabled = brief.capabilities?.ui === true;
+    if (uiEnabled) toolDefinitions.push(uiToolDefinition() as ToolDefinition);
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -161,6 +168,23 @@ export function createConciergeApp(options: ConciergeAppOptions = {}) {
 
           turns.push({ role: "assistant", content: result.content, tool_calls: result.toolCalls });
           for (const call of result.toolCalls) {
+            // render_ui is handled here, not in the tool executor: its output is
+            // a stream event for the visitor, not a message the model acts on.
+            // It also never reaches runAllowedTool, so a page cannot allowlist
+            // it as a capability and it cannot be confirmation-gated or
+            // rate-limited as if it changed something. It changes nothing.
+            if (uiEnabled && call.function.name === UI_TOOL_NAME) {
+              const outcome = handleUiCall(call.function.arguments, allowedToolNames);
+              if (outcome.event) {
+                res.write(`data: ${JSON.stringify({ ui: outcome.event })}\n\n`);
+                // The text fallback joins the transcript, so the logged answer
+                // and any non-rendering client both still read coherently.
+                full += (full ? "\n\n" : "") + outcome.event.text;
+              }
+              turns.push({ role: "tool", tool_call_id: call.id, content: outcome.toolMessage });
+              continue;
+            }
+
             const toolResult = await runAllowedTool(
               {
                 id: call.id,

@@ -32,6 +32,12 @@ export interface BriefCapabilities {
   retrieval?: RetrievalCapability;
   /** Allowlist of server-defined tool names. */
   tools?: string[];
+  /**
+   * Opt-in generative UI. Off by default: a page that does not ask for it is
+   * never offered the render_ui tool, so its stream stays text-and-tools only
+   * and no component can appear.
+   */
+  ui?: boolean;
 }
 
 export interface PageBrief {

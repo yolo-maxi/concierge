@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useChat } from "./useChat";
+import { UiBlock } from "./ui/UiBlock";
 import { CSS } from "./styles";
 import {
   THEME_PRESETS,
@@ -355,7 +356,8 @@ export function Concierge(props: ConciergeProps) {
           <div className="cc-scroll" ref={scrollRef}>
             {messages.map((m, i) => {
               const isLast = i === messages.length - 1;
-              if (isLast && m.role === "assistant" && m.content === "" && busy) {
+              const hasUi = Array.isArray(m.ui) && m.ui.length > 0;
+              if (isLast && m.role === "assistant" && m.content === "" && !hasUi && busy) {
                 return (
                   <div key={i} className="cc-msg cc-bot">
                     <span className="cc-dots">
@@ -365,9 +367,19 @@ export function Concierge(props: ConciergeProps) {
                 );
               }
               return (
-                <div key={i} className={`cc-msg ${m.role === "user" ? "cc-user" : "cc-bot"}`}>
-                  {m.role === "assistant" ? renderRichText(m.content) : m.content}
-                </div>
+                <React.Fragment key={i}>
+                  {(m.content !== "" || !hasUi) && (
+                    <div className={`cc-msg ${m.role === "user" ? "cc-user" : "cc-bot"}`}>
+                      {m.role === "assistant" ? renderRichText(m.content) : m.content}
+                    </div>
+                  )}
+                  {hasUi &&
+                    m.ui!.map((event, j) => (
+                      <div key={`ui-${j}`} className="cc-msg cc-bot cc-ui-msg">
+                        <UiBlock event={event} onSend={send} busy={busy} />
+                      </div>
+                    ))}
+                </React.Fragment>
               );
             })}
 
