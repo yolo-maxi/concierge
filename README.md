@@ -18,7 +18,7 @@ The whole thing rests on one decision: **the agent has no capabilities.** No too
 | **Sandboxed** | The agent has no hands. Jailbreak it and the worst case is an off-brand sentence — there's nothing to escalate *to*. |
 | **No hallucination** | The entire digested doc lives in the system prompt. It answers from what's in front of it and refuses when the answer isn't there. No vector DB, no retrieval step. |
 | **Fast** | Small model (`deepseek-v4-flash` via Venice by default), streamed tokens, no retrieval round-trip. First token lands quick. |
-| **Locked down** | A hardened prompt scopes it to one brand and refuses off-topic, injection, persona-swap, and prompt-extraction. The server also strips any client-supplied `system` role, caps message depth/length, and rate-limits per IP. |
+| **Locked down** | A hardened prompt scopes it to one brand and refuses off-topic, injection, persona-swap, and prompt-extraction. The server also strips any client-supplied `system` role, caps message depth/length, rate-limits per IP/session, bounds concurrency, times out cancelled work, and opens a provider circuit after repeated upstream failures. |
 
 It's less "build an AI agent" and more "great widget + a deliberately powerless chatbot."
 
@@ -36,6 +36,26 @@ your page  ──>  <Concierge/> widget        (holds no secrets, just an endpoi
 ```
 
 The widget **cannot** hold the model key — it only knows an endpoint URL. The server is the only thing that touches the key and the docs.
+
+## Server operations
+
+The server is intentionally small, but it now has bounded request controls for shared deployments:
+
+| Env | Default | Purpose |
+|---|---:|---|
+| `CONCIERGE_MAX_CONCURRENT` | `4` | Maximum `/chat` requests actively talking to the provider. |
+| `CONCIERGE_MAX_QUEUE_DEPTH` | `16` | Number of extra `/chat` requests allowed to wait before `queue_full`. |
+| `CONCIERGE_REQUEST_TIMEOUT_MS` | `30000` | End-to-end request budget. Expiry aborts queued or provider work. |
+| `CONCIERGE_RATE_LIMIT_IP` / `RATE_LIMIT` | `20` | Sliding-window requests per client IP. |
+| `CONCIERGE_RATE_LIMIT_SESSION` | `12` | Sliding-window requests per widget session id. |
+| `CONCIERGE_RATE_LIMIT_WINDOW_MS` | `60000` | IP limiter window. |
+| `CONCIERGE_SESSION_RATE_LIMIT_WINDOW_MS` | `60000` | Session limiter window. |
+| `CONCIERGE_CIRCUIT_FAILURES` | `3` | Consecutive provider failures before the circuit opens. |
+| `CONCIERGE_CIRCUIT_RESET_MS` | `30000` | Delay before the circuit allows a half-open probe. |
+
+`GET /health` always reports process liveness plus queue/circuit state. `GET /ready` returns `503` when the queue is saturated or the provider circuit is open, so a load balancer can drain the instance without treating the process as dead. Structured client failures include a stable `code` such as `queue_full`, `rate_limited_ip`, `rate_limited_session`, or `provider_circuit_open`.
+
+The default test suite uses fake providers and never needs provider secrets. `pnpm --filter @concierge/server smoke:concurrency` runs a repeatable local smoke that prints JSON evidence for status codes, completed SSE streams, peak provider concurrency, provider call count, and final runtime state. Live provider testing should remain opt-in by adding separate scripts or environment-gated tests that require explicit secrets.
 
 ---
 

@@ -9,6 +9,7 @@
     "dev": "tsx watch src/index.ts",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test \"test/**/*.test.ts\"",
+    "smoke:concurrency": "tsx test/concurrency-smoke.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js"
   },
