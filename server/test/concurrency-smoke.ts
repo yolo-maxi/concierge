@@ -22,6 +22,47 @@ writeFileSync(
 );
 process.env.CONCIERGE_BRIEF = briefPath;
 
+class SlowProvider implements ChatProvider {
+  readonly name = "venice";
+  calls = 0;
+  currentConcurrent = 0;
+  maxObservedConcurrent = 0;
+
+  constructor(private readonly delayMs: number) {}
+
+  async streamChat(messages: ChatTurn[], onDelta: (text: string) => void, opts: StreamChatOptions = {}): Promise<string> {
+    const result = await this.streamChatWithToolCalls(messages, onDelta, opts);
+    return result.content;
+  }
+
+  async streamChatWithToolCalls(
+    _messages: ChatTurn[],
+    onDelta: (text: string) => void,
+    opts: StreamChatOptions = {}
+  ): Promise<StreamChatResult> {
+    this.calls++;
+    this.currentConcurrent++;
+    this.maxObservedConcurrent = Math.max(this.maxObservedConcurrent, this.currentConcurrent);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, this.delayMs);
+        opts.signal?.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(timer);
+            reject(new DOMException("Aborted", "AbortError"));
+          },
+          { once: true }
+        );
+      });
+      onDelta("smoke-ok");
+      return { content: "smoke-ok", toolCalls: [] };
+    } finally {
+      this.currentConcurrent--;
+    }
+  }
+}
+
 const provider = new SlowProvider(75);
 const runtime = createRuntime(
   limitsFromEnv({
@@ -68,43 +109,3 @@ try {
   await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
 }
 
-class SlowProvider implements ChatProvider {
-  readonly name = "venice";
-  calls = 0;
-  currentConcurrent = 0;
-  maxObservedConcurrent = 0;
-
-  constructor(private readonly delayMs: number) {}
-
-  async streamChat(messages: ChatTurn[], onDelta: (text: string) => void, opts: StreamChatOptions = {}): Promise<string> {
-    const result = await this.streamChatWithToolCalls(messages, onDelta, opts);
-    return result.content;
-  }
-
-  async streamChatWithToolCalls(
-    _messages: ChatTurn[],
-    onDelta: (text: string) => void,
-    opts: StreamChatOptions = {}
-  ): Promise<StreamChatResult> {
-    this.calls++;
-    this.currentConcurrent++;
-    this.maxObservedConcurrent = Math.max(this.maxObservedConcurrent, this.currentConcurrent);
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(resolve, this.delayMs);
-        opts.signal?.addEventListener(
-          "abort",
-          () => {
-            clearTimeout(timer);
-            reject(new DOMException("Aborted", "AbortError"));
-          },
-          { once: true }
-        );
-      });
-      onDelta("smoke-ok");
-      return { content: "smoke-ok", toolCalls: [] };
-    } finally {
-      this.currentConcurrent--;
-    }
-  }
-}
