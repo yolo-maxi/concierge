@@ -9,6 +9,9 @@ interface LeadArgs {
 export const captureLeadTool: ConciergeTool = {
   name: "capture_lead",
   description: "Capture a visitor's email address and optional name/message for follow-up.",
+  // POSTs the address to an external webhook: a real side effect, and one a
+  // visitor must agree to before it leaves the page.
+  effect: "side-effect",
   schema: {
     type: "object",
     additionalProperties: false,

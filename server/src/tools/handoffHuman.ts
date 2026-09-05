@@ -4,6 +4,9 @@ import type { ConciergeTool, ToolContext } from "./types.js";
 export const handoffHumanTool: ConciergeTool = {
   name: "handoff_human",
   description: "Request urgent human attention for the current visitor conversation.",
+  // This IS the escalation path, so it is not itself confirmation-gated —
+  // but it is idempotency guarded so a retry loop cannot page a human twice.
+  effect: "handoff",
   schema: {
     type: "object",
     additionalProperties: false,

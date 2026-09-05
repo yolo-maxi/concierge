@@ -65,7 +65,16 @@ export interface ConciergeToolCallEvent extends ConciergeBaseEvent {
   type: "concierge.tool_call";
   toolName: string;
   args: Record<string, unknown>;
-  outcome: "ok" | "error" | "rate_limited" | "timeout" | "blocked";
+  outcome:
+    | "ok"
+    | "error"
+    | "rate_limited"
+    | "timeout"
+    | "blocked"
+    /** Side effect refused pending the visitor's explicit go-ahead. */
+    | "confirmation_required"
+    /** Identical effect already carried out in this window; not repeated. */
+    | "duplicate";
   durationMs: number;
 }
 

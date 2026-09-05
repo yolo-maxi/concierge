@@ -213,7 +213,28 @@ test("passes only allowlisted tools and feeds sanitized tool results back to the
     assert.equal(res.status, 200);
     assert.match(body, /Tool reply/);
     assert.deepEqual(provider.calls[0]?.tools?.map((tool) => tool.function.name), ["capture_lead"]);
-    assert.equal(provider.calls[1]?.messages.some((m) => m.role === "tool" && m.content.includes("not configured")), true);
+
+    // capture_lead is a side-effect tool, so the first call is gated: the
+    // handler does not run and the model is told to get the visitor's
+    // agreement first. Previously this asserted the handler's own "not
+    // configured" reply, i.e. that the effect was attempted unprompted.
+    assert.equal(
+      provider.calls[1]?.messages.some((m) => m.role === "tool" && /go-ahead/i.test(m.content)),
+      true,
+      "an unconfirmed side effect must come back as a confirmation request",
+    );
+    assert.equal(
+      provider.calls[1]?.messages.some((m) => m.role === "tool" && m.content.includes("not configured")),
+      false,
+      "the handler must not have run before confirmation",
+    );
+
+    // The gate is usable only if the ticket field is advertised to the model.
+    const leadSchema = provider.calls[0]?.tools?.[0]?.function.parameters as
+      | { properties?: Record<string, unknown> }
+      | undefined;
+    assert.ok(leadSchema?.properties?.confirm, "capture_lead must advertise the confirm field");
+
     assert.equal(provider.calls[1]?.messages.some((m) => m.content.includes("run shell")), true);
   } finally {
     await close();

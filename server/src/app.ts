@@ -7,7 +7,7 @@ import { chatProviderFromEnv, type ChatProvider, type ChatTurn, type ToolDefinit
 import { logConversation } from "./log.js";
 import type { ChatRequestBody, ChatMessage } from "./types.js";
 import { getAllowedTools } from "./tools/registry.js";
-import { runAllowedTool, toolContext } from "./tools/executor.js";
+import { runAllowedTool, toolContext, toolParameterSchema } from "./tools/executor.js";
 import {
   createRuntime,
   enforceRateLimits,
@@ -112,7 +112,7 @@ export function createConciergeApp(options: ConciergeAppOptions = {}) {
       function: {
         name: tool.name,
         description: tool.description,
-        parameters: tool.schema,
+        parameters: toolParameterSchema(tool),
       },
     }));
 

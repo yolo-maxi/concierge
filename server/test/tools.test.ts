@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { getAllowedTools, getTool } from "../src/tools/registry.js";
-import { runAllowedTool, toolContext } from "../src/tools/executor.js";
-import type { ConciergeTool, ToolContext } from "../src/tools/types.js";
+import {
+  resetToolEffectState,
+  runAllowedTool,
+  toolContext,
+  toolParameterSchema,
+} from "../src/tools/executor.js";
+import { toolEffect, type ConciergeTool, type ToolContext, type ToolEffect } from "../src/tools/types.js";
 import type { PageBrief } from "../src/types.js";
 
 // The registry and executor are the policy boundary: they are the only thing
@@ -23,12 +28,19 @@ function ctx(overrides: Partial<ToolContext> = {}): ToolContext {
   return toolContext({ brief, ip: "203.0.113.9", ...overrides });
 }
 
-/** A tool the registry has never heard of, used to stand in for one a model invented. */
-function fakeTool(name: string, handler: ConciergeTool["handler"]): ConciergeTool {
+/**
+ * A tool the registry has never heard of, used to stand in for one a model invented.
+ *
+ * Declared `read` by default so these doubles exercise executor mechanics
+ * (blocking, timeouts, rate limits) without tripping the side-effect
+ * confirmation gate, which has its own tests below.
+ */
+function fakeTool(name: string, handler: ConciergeTool["handler"], effect: ToolEffect = "read"): ConciergeTool {
   return {
     name,
     description: "test double",
     schema: { type: "object", additionalProperties: false, properties: {} },
+    effect,
     sanitizeArgs: (args) => (args && typeof args === "object" ? { ...(args as object) } : {}),
     handler,
   };
@@ -134,6 +146,7 @@ test("a tool whose sanitizer throws is still executed and still audited", async 
       name: "odd",
       description: "sanitizer throws",
       schema: {},
+      effect: "read",
       sanitizeArgs: () => { throw new Error("sanitizer exploded"); },
       handler: async () => "still ran",
     }],
@@ -200,4 +213,194 @@ test("rate limiting is per tool per caller, and does not leak across callers", a
     ctx({ ip: "198.51.100.8" }),
   );
   assert.equal(other.content, "pong", "a different caller must not inherit the cap");
+});
+
+// ---------------------------------------------------------------------------
+// Confirmation gate and idempotency.
+//
+// Both clauses were in the item's acceptance criteria and were genuinely unmet:
+// capture_lead would POST a visitor's address to an external webhook on the
+// model's say-so alone, and an identical retry would POST it a second time.
+
+test("an unclassified tool is treated as side-effecting, not as read-only", () => {
+  // Fail-closed default. If this inverted, a tool author forgetting `effect`
+  // would silently ship an ungated side effect.
+  const unclassified: ConciergeTool = {
+    name: "unclassified",
+    description: "no effect declared",
+    schema: {},
+    sanitizeArgs: () => ({}),
+    handler: async () => "ran",
+  };
+  assert.equal(toolEffect(unclassified), "side-effect");
+  assert.equal(toolEffect({ ...unclassified, effect: "read" }), "read");
+});
+
+test("a side-effect tool is refused on first call and runs only after the ticket comes back", async () => {
+  resetToolEffectState();
+  let ran = 0;
+  const allowed = new Map<string, ConciergeTool>([
+    ["book", fakeTool("book", async () => { ran += 1; return "booked"; }, "side-effect")],
+  ]);
+  // Distinct IP per case: the rate limiter is keyed per IP+tool and the
+  // confirmation exchange costs two calls, so cases sharing an IP would
+  // exhaust the 5/60s cap and fail for the wrong reason.
+  const caller = ctx({ ip: "192.0.2.11", sessionId: "sess-confirm-1" });
+
+  const first = await runAllowedTool(
+    { id: "c1", name: "book", arguments: JSON.stringify({ email: "ada@example.com" }) },
+    allowed,
+    caller,
+  );
+  assert.equal(ran, 0, "the effect must not happen before the visitor agrees");
+  assert.match(first.content, /needs the visitor's explicit go-ahead/i);
+
+  const ticket = first.content.match(/confirm: "([0-9a-f]+)"/)?.[1];
+  assert.ok(ticket, "the refusal must hand back a usable ticket");
+
+  const confirmed = await runAllowedTool(
+    { id: "c2", name: "book", arguments: JSON.stringify({ email: "ada@example.com", confirm: ticket }) },
+    allowed,
+    caller,
+  );
+  assert.equal(confirmed.content, "booked");
+  assert.equal(ran, 1, "the confirmed call runs exactly once");
+});
+
+test("a forged or stale confirmation ticket does not open the gate", async () => {
+  resetToolEffectState();
+  let ran = 0;
+  const allowed = new Map<string, ConciergeTool>([
+    ["book", fakeTool("book", async () => { ran += 1; return "booked"; }, "side-effect")],
+  ]);
+
+  // A model that simply invents a plausible-looking ticket must get nowhere.
+  const forged = await runAllowedTool(
+    { id: "c", name: "book", arguments: JSON.stringify({ email: "ada@example.com", confirm: "deadbeef1234" }) },
+    allowed,
+    ctx({ ip: "192.0.2.12", sessionId: "sess-forge" }),
+  );
+  assert.equal(ran, 0, "an unissued ticket must not authorise the effect");
+  assert.match(forged.content, /go-ahead/i);
+});
+
+test("a ticket issued for one intent does not authorise a different one", async () => {
+  resetToolEffectState();
+  const seen: string[] = [];
+  const allowed = new Map<string, ConciergeTool>([
+    ["book", fakeTool("book", async (args) => {
+      seen.push((args as { email: string }).email);
+      return "booked";
+    }, "side-effect")],
+  ]);
+  const caller = ctx({ ip: "192.0.2.13", sessionId: "sess-swap" });
+
+  const first = await runAllowedTool(
+    { id: "c1", name: "book", arguments: JSON.stringify({ email: "ada@example.com" }) },
+    allowed,
+    caller,
+  );
+  const ticket = first.content.match(/confirm: "([0-9a-f]+)"/)?.[1];
+  assert.ok(ticket);
+
+  // Same ticket, different payload: the classic swap. It must be refused,
+  // otherwise a confirmed "email Ada" becomes an unconfirmed "email Mallory".
+  const swapped = await runAllowedTool(
+    { id: "c2", name: "book", arguments: JSON.stringify({ email: "mallory@example.com", confirm: ticket }) },
+    allowed,
+    caller,
+  );
+  assert.deepEqual(seen, [], "a ticket must not carry across to different arguments");
+  assert.match(swapped.content, /go-ahead/i);
+});
+
+test("an identical confirmed effect is not carried out twice", async () => {
+  resetToolEffectState();
+  let ran = 0;
+  const allowed = new Map<string, ConciergeTool>([
+    ["book", fakeTool("book", async () => { ran += 1; return `booked-${ran}`; }, "side-effect")],
+  ]);
+  const caller = ctx({ ip: "192.0.2.14", sessionId: "sess-idem" });
+  const args = { email: "ada@example.com" };
+
+  const first = await runAllowedTool(
+    { id: "c1", name: "book", arguments: JSON.stringify(args) }, allowed, caller,
+  );
+  const ticket = first.content.match(/confirm: "([0-9a-f]+)"/)?.[1];
+  const done = await runAllowedTool(
+    { id: "c2", name: "book", arguments: JSON.stringify({ ...args, confirm: ticket }) }, allowed, caller,
+  );
+  assert.equal(done.content, "booked-1");
+
+  // The provider retries, or the model re-emits the same call. The webhook must
+  // not fire again; the caller sees the original result.
+  const replay = await runAllowedTool(
+    { id: "c3", name: "book", arguments: JSON.stringify({ ...args, confirm: ticket }) }, allowed, caller,
+  );
+  assert.equal(ran, 1, "a duplicate must not reach the handler a second time");
+  assert.equal(replay.content, "booked-1", "the replay returns the original outcome");
+});
+
+test("idempotency is scoped to the caller and the arguments, not global", async () => {
+  resetToolEffectState();
+  let ran = 0;
+  const allowed = new Map<string, ConciergeTool>([
+    ["page", fakeTool("page", async () => { ran += 1; return "paged"; }, "handoff")],
+  ]);
+
+  // handoff is not confirmation-gated, so one call runs it outright.
+  await runAllowedTool({ id: "a", name: "page", arguments: "{}" }, allowed, ctx({ ip: "192.0.2.15", sessionId: "s1" }));
+  assert.equal(ran, 1);
+
+  // Same visitor, same reason: a retry loop must not page a human repeatedly.
+  await runAllowedTool({ id: "b", name: "page", arguments: "{}" }, allowed, ctx({ ip: "192.0.2.15", sessionId: "s1" }));
+  assert.equal(ran, 1, "a repeat from the same caller is suppressed");
+
+  // A different visitor is a different intent and must still get through.
+  await runAllowedTool({ id: "c", name: "page", arguments: "{}" }, allowed, ctx({ ip: "192.0.2.16", sessionId: "s2" }));
+  assert.equal(ran, 2, "dedup must not silence other visitors");
+
+  // Same visitor, different reason: also a distinct intent.
+  await runAllowedTool(
+    { id: "d", name: "page", arguments: JSON.stringify({ reason: "billing" }) },
+    allowed,
+    ctx({ ip: "192.0.2.15", sessionId: "s1" }),
+  );
+  assert.equal(ran, 3, "different arguments are a different intent");
+});
+
+test("read tools are neither gated nor deduplicated", async () => {
+  resetToolEffectState();
+  let ran = 0;
+  const allowed = new Map<string, ConciergeTool>([
+    ["lookup", fakeTool("lookup", async () => { ran += 1; return "answer"; }, "read")],
+  ]);
+  const caller = ctx({ ip: "192.0.2.17", sessionId: "sess-read" });
+
+  const a = await runAllowedTool({ id: "1", name: "lookup", arguments: "{}" }, allowed, caller);
+  const b = await runAllowedTool({ id: "2", name: "lookup", arguments: "{}" }, allowed, caller);
+  assert.equal(a.content, "answer");
+  assert.equal(b.content, "answer");
+  assert.equal(ran, 2, "asking the same read question twice must actually ask twice");
+});
+
+test("the confirm field is advertised only on side-effect tools", () => {
+  // The model cannot return a ticket it was never told about, so the gate is
+  // only usable if the schema carries the field.
+  const gated = toolParameterSchema(getTool("capture_lead")!);
+  const props = (gated as { properties: Record<string, unknown> }).properties;
+  assert.ok(props.confirm, "capture_lead must advertise confirm");
+  assert.ok(props.email, "the tool's own properties must survive");
+
+  const handoff = getTool("handoff_human")!;
+  const ungated = toolParameterSchema(handoff);
+  assert.equal((ungated as { properties?: Record<string, unknown> }).properties?.confirm, undefined);
+  assert.deepEqual(ungated, handoff.schema, "non-gated tools advertise their own schema unchanged");
+});
+
+test("capture_lead is classified as a side effect and handoff_human as a handoff", () => {
+  // The classification is the whole gate. If capture_lead were ever marked
+  // read, a visitor's address would leave the page with no confirmation.
+  assert.equal(toolEffect(getTool("capture_lead")!), "side-effect");
+  assert.equal(toolEffect(getTool("handoff_human")!), "handoff");
 });
