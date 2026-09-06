@@ -19,6 +19,7 @@
   "scripts": {
     "build": "tsup src/index.ts --format esm,cjs --dts --clean --external react --external react-dom && pnpm build:embed",
     "build:embed": "esbuild src/embed.tsx --bundle --format=iife --minify --target=es2019 --outfile=dist/concierge-embed.js",
+    "test:browser": "node test/browser-render.mjs",
     "dev": "tsup src/index.ts --format esm,cjs --dts --watch --external react --external react-dom"
   },
   "peerDependencies": {
