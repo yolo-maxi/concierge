@@ -1,4 +1,20 @@
 export const CSS = `
+/* Shadow-mount inheritance barrier.
+
+   Shadow DOM stops host CSS from *matching* our elements, but it does not stop
+   INHERITED properties (letter-spacing, word-spacing, text-transform, white-space,
+   font-style/weight, visibility, cursor, direction, …) flowing in through the host
+   element. The host element carries an inline "all: initial", which an aggressive
+   host stylesheet defeats with !important — author !important beats inline.
+
+   This selector lives inside the shadow root, where host page CSS can never reach
+   it, so it is the one reliable place to cut inheritance. In non-isolated mode the
+   selector simply matches nothing. */
+[data-cc-shadow-mount] {
+  all: initial;
+  display: block;
+}
+
 .cc-root {
   position: fixed;
   z-index: var(--cc-z-index);
