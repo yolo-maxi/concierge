@@ -46,6 +46,9 @@ for (const f of [join(ROOT, "dist-deploy/server.bundle.mjs"), join(ROOT, "site/d
   if (!existsSync(f)) { console.error(`cannot run: missing ${f}`); process.exit(2); }
 }
 
+// LIVE_URL=https://concierge.repo.box runs the same page assertions against a
+// deployed site instead of booting a local server (deployed browser smoke).
+const LIVE_URL = (process.env.LIVE_URL || "").replace(/\/$/, "");
 const work = mkdtempSync(join(tmpdir(), "concierge-site-gate-"));
 const packet = {
   manifestVersion: 1,
@@ -61,11 +64,11 @@ const env = Object.fromEntries(
   readFileSync(PROD_ENV, "utf8").split("\n").filter((l) => /^[A-Z_]+=/.test(l) && !/^TELEGRAM_|^CONCIERGE_BRIEF|^PORT=|^CONCIERGE_EMBED_FILE|^ALLOWED_ORIGINS/.test(l)).map((l) => { const i = l.indexOf("="); return [l.slice(0, i), l.slice(i + 1)]; })
 );
 const serverEnv = { ...process.env, ...env, PORT: String(SERVER_PORT), CONCIERGE_PACKET: join(work, "packet.json"), CONCIERGE_EMBED_FILE: join(ROOT, "dist-deploy/concierge-embed.js"), CONCIERGE_SANDBOX: "1", ALLOWED_ORIGINS: `http://127.0.0.1:${SITE_PORT}` };
-const server = spawn(process.execPath, [join(ROOT, "dist-deploy/server.bundle.mjs")], { env: serverEnv, stdio: ["ignore", "pipe", "pipe"] });
 let serverLog = "";
-server.stdout.on("data", (d) => (serverLog += d));
-server.stderr.on("data", (d) => (serverLog += d));
-const site = spawn(process.execPath, [join(ROOT, "scripts/serve-site.mjs"), "--port", String(SITE_PORT), "--upstream", `http://127.0.0.1:${SERVER_PORT}`], { stdio: "ignore" });
+const server = LIVE_URL ? null : spawn(process.execPath, [join(ROOT, "dist-deploy/server.bundle.mjs")], { env: serverEnv, stdio: ["ignore", "pipe", "pipe"] });
+server?.stdout.on("data", (d) => (serverLog += d));
+server?.stderr.on("data", (d) => (serverLog += d));
+const site = LIVE_URL ? null : spawn(process.execPath, [join(ROOT, "scripts/serve-site.mjs"), "--port", String(SITE_PORT), "--upstream", `http://127.0.0.1:${SERVER_PORT}`], { stdio: "ignore" });
 
 async function waitFor(url, ms = 20000) {
   const end = Date.now() + ms;
@@ -79,13 +82,14 @@ async function waitFor(url, ms = 20000) {
 let fails = 0;
 const ok = (what, cond) => { console.log(`${cond ? "ok  " : "FAIL"} ${what}`); if (!cond) fails++; };
 
-const cleanup = () => { server.kill(); site.kill(); rmSync(work, { recursive: true, force: true }); };
+const cleanup = () => { server?.kill(); site?.kill(); rmSync(work, { recursive: true, force: true }); };
 process.on("exit", cleanup);
 
 try {
-  await waitFor(`http://127.0.0.1:${SERVER_PORT}/health`);
-  await waitFor(`http://127.0.0.1:${SITE_PORT}/`);
-  const base = `http://127.0.0.1:${SITE_PORT}`;
+  const base = LIVE_URL || `http://127.0.0.1:${SITE_PORT}`;
+  if (!LIVE_URL) await waitFor(`http://127.0.0.1:${SERVER_PORT}/health`);
+  await waitFor(`${base}/`);
+  console.log(`target: ${base}`);
 
   // Served artifacts: no key, no source map, embed proxied byte-identical.
   const key = env.VENICE_API_KEY || "";
@@ -96,6 +100,7 @@ try {
   }
   const served = await (await fetch(base + "/concierge/embed.js")).text();
   ok("/concierge/embed.js is the built bundle", served === readFileSync(join(ROOT, "dist-deploy/concierge-embed.js"), "utf8"));
+  if (LIVE_URL) ok("live embed carries the configurator API", /resolveThemeTokens/.test(served));
   ok("validate endpoint reachable through the site proxy", (await fetch(base + "/concierge/brief/validate", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status === 422);
 
   const { chromium } = loadPlaywright();
@@ -194,13 +199,15 @@ try {
 
   // Paste the snippet into a blank HTML file: it must render the configured widget.
   const local = snippet.replace("https://concierge.repo.box/concierge/embed.js", base + "/concierge/embed.js").replace("https://concierge.repo.box/concierge/chat", base + "/concierge/chat").replace(/<!--[\s\S]*?-->/g, "");
-  writeFileSync(join(ROOT, "site/dist/__paste-test.html"), `<!doctype html><title>paste</title><p>blank host page</p>${local}`);
+  const pasteHtml = `<!doctype html><title>paste</title><p>blank host page</p>${local}`;
   const blank = await browser.newPage({ viewport: { width: 1200, height: 800 } });
+  // Serve the blank host page from the site's own origin so the relative and
+  // absolute endpoints behave as they would for a real embedder.
+  await blank.route(base + "/__paste-test.html", (route) => route.fulfill({ status: 200, contentType: "text/html", body: pasteHtml }));
   await blank.goto(base + "/__paste-test.html", { waitUntil: "networkidle" });
   await blank.waitForTimeout(500);
   const pasted = await blank.evaluate(() => { const r = document.getElementById("concierge-embed-root")?.firstElementChild?.shadowRoot; const root = r && r.querySelector(".cc-root"); return { mounted: !!root, bg: root ? getComputedStyle(root).getPropertyValue("--cc-bg").trim() : "", label: r ? r.querySelector("button.cc-launch")?.textContent.trim() : "" }; });
   ok(`pasted snippet renders the configured widget (theme bg=${pasted.bg}, label=${pasted.label})`, pasted.mounted && pasted.bg === "#050805" && pasted.label === "Ask Acme Robots");
-  rmSync(join(ROOT, "site/dist/__paste-test.html"), { force: true });
   await blank.close();
 
   if (SHOTS) await page.screenshot({ path: join(SHOTS, "concierge-site-1440.png"), fullPage: false });
