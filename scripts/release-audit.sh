@@ -83,8 +83,10 @@ step "smoke-bundle.sh boots and verifies the artifact" "$WORK/smoke.log" -- bash
 
 echo "=== 3. default-powerless: the REAL production brief grants nothing ==="
 [ -r "$PROD_ENV" ] || need "cannot read $PROD_ENV"
-BRIEF="$(grep -E '^CONCIERGE_BRIEF=' "$PROD_ENV" | cut -d= -f2-)"
-[ -r "$BRIEF" ] || need "cannot read brief $BRIEF"
+# Production may point at a single brief, a brief map, or a packet manifest;
+# whichever it is, every page inside must grant nothing.
+BRIEF="$(grep -E '^CONCIERGE_(BRIEF|BRIEFS|PACKET)=' "$PROD_ENV" | head -1 | cut -d= -f2-)"
+[ -r "$BRIEF" ] || need "cannot read brief source $BRIEF"
 # Assert the positive shape (no capabilities grant anywhere) rather than
 # grepping for forbidden words: a grep passes both when the grant is absent and
 # when you are looking in the wrong place.
@@ -95,7 +97,7 @@ const bad=[];
   if(k==="capabilities") bad.push(p+"/"+k+" = "+JSON.stringify(o[k]));
   walk(o[k],p+"/"+k);} } })(b,"");
 if(bad.length){console.error(bad.join("\n"));process.exit(1);} ' "$BRIEF"; then
-  ok "production brief declares no capabilities: no tools, no retrieval, no render_ui"
+  ok "production brief source $(basename "$BRIEF") declares no capabilities on any page: no tools, no retrieval, no render_ui"
 else
   bad "production brief grants a capability (see above) - not powerless by default"
 fi
