@@ -304,3 +304,38 @@ export function densityTokens(density?: "comfortable" | "compact"): ThemeTokens 
     "--cc-font-size-credit": "10px",
   };
 }
+
+export interface ResolveThemeOptions {
+  theme?: ThemePresetName | Partial<ThemeTokens> | string;
+  accentColor?: string;
+  accentColor2?: string;
+  radiusScale?: number;
+  density?: "comfortable" | "compact";
+  fontFamily?: string;
+  themeVars?: Record<string, string>;
+}
+
+/**
+ * The widget's token composition, in one place: preset → theme object →
+ * accent derivation → density → radius scale → fontFamily → themeVars. The
+ * component renders from this, and the embed exposes it so a configurator can
+ * show the exact effective value of every token.
+ */
+export function resolveThemeTokens(opts: ResolveThemeOptions = {}): ThemeTokens {
+  const presetName = isThemePresetName(opts.theme) ? opts.theme : "midnight";
+  const presetTokens = THEME_PRESETS[presetName];
+  const themeObject = typeof opts.theme === "object" && opts.theme ? (opts.theme as ThemeTokens) : {};
+  const tokenVars: ThemeTokens = {
+    ...presetTokens,
+    ...themeObject,
+    ...deriveAccentTokens(opts.accentColor, opts.accentColor2),
+  };
+  const density = densityTokens(opts.density);
+  return {
+    ...tokenVars,
+    ...density,
+    ...scaleRadiusTokens({ ...tokenVars, ...density }, opts.radiusScale),
+    ...(opts.fontFamily ? { "--cc-font-family": opts.fontFamily } : {}),
+    ...(opts.themeVars ?? {}),
+  };
+}

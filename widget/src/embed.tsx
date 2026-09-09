@@ -19,20 +19,50 @@
  * window.Concierge.mount({...props}) is also exposed for manual control.
  */
 import React from "react";
-import { createRoot } from "react-dom/client";
+import { createRoot, type Root } from "react-dom/client";
 import { Concierge, type ConciergeProps } from "./Concierge";
+import { THEME_PRESETS, TOKEN_METADATA, resolveThemeTokens } from "./themes";
 
 const MOUNT_ID = "concierge-embed-root";
 
-function mount(props: ConciergeProps): void {
+// One React root per host element. Mounting again into the same host re-renders
+// with the new props instead of creating a second root, which is what a live
+// configurator needs: change a token, call mount, see the change.
+const roots = new WeakMap<Element, Root>();
+
+export interface MountOptions {
+  /** Render into this element instead of a body-appended host. */
+  container?: Element | null;
+}
+
+function mount(props: ConciergeProps, options: MountOptions = {}): void {
   if (typeof document === "undefined") return;
-  let host = document.getElementById(MOUNT_ID);
+  let host: Element | null = options.container ?? null;
   if (!host) {
-    host = document.createElement("div");
-    host.id = MOUNT_ID;
-    document.body.appendChild(host);
+    host = document.getElementById(MOUNT_ID);
+    if (!host) {
+      const created = document.createElement("div");
+      created.id = MOUNT_ID;
+      document.body.appendChild(created);
+      host = created;
+    }
   }
-  createRoot(host).render(React.createElement(Concierge, props));
+  let root = roots.get(host);
+  if (!root) {
+    root = createRoot(host);
+    roots.set(host, root);
+  }
+  root.render(React.createElement(Concierge, props));
+}
+
+function unmount(container?: Element | null): void {
+  if (typeof document === "undefined") return;
+  const host = container ?? document.getElementById(MOUNT_ID);
+  if (!host) return;
+  const root = roots.get(host);
+  if (!root) return;
+  root.unmount();
+  roots.delete(host);
 }
 
 function readConfig(): ConciergeProps | null {
@@ -79,8 +109,9 @@ function readConfig(): ConciergeProps | null {
   return props;
 }
 
-// Expose for manual control.
-(globalThis as any).Concierge = { mount };
+// Expose for manual control. The theme tables are the same objects the widget
+// renders from, so a configurator built on them cannot drift from the widget.
+(globalThis as any).Concierge = { mount, unmount, THEME_PRESETS, TOKEN_METADATA, resolveThemeTokens };
 
 // Auto-mount from the script tag's data-* attributes.
 function boot(): void {

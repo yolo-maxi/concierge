@@ -9,6 +9,8 @@ import type { ChatRequestBody, ChatMessage } from "./types.js";
 import { getAllowedTools } from "./tools/registry.js";
 import { runAllowedTool, toolContext, toolParameterSchema } from "./tools/executor.js";
 import { handleUiCall, uiToolDefinition, UI_TOOL_NAME } from "./ui/tool.js";
+import { briefValidationErrors } from "./packet.js";
+import { createSandboxStore, isSandboxPageId, SANDBOX_LIMITS, type SandboxStore } from "./sandbox.js";
 import {
   createRuntime,
   enforceRateLimits,
@@ -26,6 +28,7 @@ export interface ConciergeAppOptions {
   env?: NodeJS.ProcessEnv;
   runtime?: Runtime;
   providerFactory?: () => ChatProvider;
+  sandbox?: SandboxStore;
 }
 
 export function createConciergeApp(options: ConciergeAppOptions = {}) {
@@ -33,6 +36,9 @@ export function createConciergeApp(options: ConciergeAppOptions = {}) {
   const runtime = options.runtime ?? createRuntime();
   const providerFactory =
     options.providerFactory ?? (() => chatProviderFromEnv(env, getConfiguredProviderDefaults()));
+
+  const sandboxEnabled = env.CONCIERGE_SANDBOX === "1";
+  const sandbox = options.sandbox ?? (sandboxEnabled ? createSandboxStore() : null);
 
   const app = express();
   app.use(express.json({ limit: "256kb" }));
@@ -62,6 +68,46 @@ export function createConciergeApp(options: ConciergeAppOptions = {}) {
     });
   }
 
+  // Stateless check of a brief against the same rules the packet loader
+  // applies. Nothing is stored; the configurator uses it to tell an author
+  // exactly what is missing before they self-host.
+  app.post("/brief/validate", (req, res) => {
+    const rateError = enforceRateLimits(runtime, clientIp(req));
+    if (rateError) {
+      writeHttpError(res, rateError);
+      return;
+    }
+    const errors = briefValidationErrors(req.body);
+    const hasCapabilities = req.body && typeof req.body === "object" && "capabilities" in req.body;
+    res.status(errors.length ? 422 : 200).json({
+      ok: errors.length === 0,
+      errors,
+      note: hasCapabilities
+        ? "capabilities are honoured only from server-loaded briefs; a client-submitted brief is always powerless"
+        : undefined,
+    });
+  });
+
+  // Registers a short-lived, powerless sandbox brief and returns the page id
+  // to chat with. Disabled unless CONCIERGE_SANDBOX=1. See sandbox.ts.
+  app.post("/sandbox/brief", (req, res) => {
+    if (!sandbox) {
+      res.status(404).json({ error: "Sandbox briefs are not enabled on this server.", code: "sandbox_disabled" });
+      return;
+    }
+    const rateError = enforceRateLimits(runtime, clientIp(req));
+    if (rateError) {
+      writeHttpError(res, rateError);
+      return;
+    }
+    const result = sandbox.register(req.body);
+    if (!result.ok) {
+      res.status(422).json({ ok: false, errors: result.errors, code: "invalid_brief" });
+      return;
+    }
+    res.json({ ok: true, pageId: result.pageId, expiresAt: new Date(result.expiresAt).toISOString(), limits: SANDBOX_LIMITS });
+  });
+
   app.post("/chat", requestGate(runtime), async (req, res) => {
     const ip = clientIp(req);
     const body = req.body as ChatRequestBody;
@@ -84,11 +130,22 @@ export function createConciergeApp(options: ConciergeAppOptions = {}) {
     }
 
     let brief;
-    try {
-      brief = getBrief(body.pageId);
-    } catch {
-      res.status(500).json({ error: "Page not configured.", code: "page_not_configured" });
-      return;
+    if (isSandboxPageId(body.pageId)) {
+      // A sandbox id never falls through to the configured briefs: an expired
+      // or unknown sandbox page is an error, not the default page.
+      const found = sandbox?.get(body.pageId) ?? null;
+      if (!found) {
+        res.status(404).json({ error: "Sandbox brief expired or unknown.", code: "sandbox_expired" });
+        return;
+      }
+      brief = found;
+    } else {
+      try {
+        brief = getBrief(body.pageId);
+      } catch {
+        res.status(500).json({ error: "Page not configured.", code: "page_not_configured" });
+        return;
+      }
     }
 
     const state = runtime.state();

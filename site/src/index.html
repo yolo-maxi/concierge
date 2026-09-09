@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Concierge — a deliberately powerless landing-page agent</title>
+  <meta name="description" content="An embeddable chat widget plus a sandboxed proxy that answers visitor questions from one page brief. No tools, no retrieval, nothing to escalate to. Try it, configure it, self-host it." />
+  <meta property="og:title" content="Concierge — a deliberately powerless landing-page agent" />
+  <meta property="og:description" content="Ask the widget on this page what Concierge is. Then write your own brief, theme every token, and export the embed." />
+  <meta property="og:url" content="https://concierge.repo.box/" />
+  <link rel="canonical" href="https://concierge.repo.box/" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='50' font-size='52'%3E%F0%9F%AA%B8%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <a class="skip" href="#interview">Skip to the interview</a>
+  <header class="top">
+    <a class="brand" href="/"><span aria-hidden="true">🪸</span> Concierge</a>
+    <nav aria-label="Sections">
+      <a href="#safe">Why it's safe</a>
+      <a href="#interview">Interview</a>
+      <a href="#configure">Configure</a>
+      <a href="#export">Export</a>
+      <a href="#docs">Docs</a>
+      <a href="https://github.com/yolo-maxi/concierge" rel="noopener">GitHub</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero" id="top">
+      <p class="eyebrow">Open source · MIT · by <a href="https://repo.box" rel="noopener">repo.box</a></p>
+      <h1>A landing-page agent that <em>cannot</em> do anything but answer.</h1>
+      <p class="lede">
+        Concierge is a chat widget plus a sandboxed proxy. It answers visitor questions from one page brief
+        you wrote, streams fast, and has no tools, no browser, no retrieval and no memory. Jailbreak it and the
+        worst case is an off-brand sentence.
+      </p>
+      <p class="lede">
+        The widget in the corner of this page is Concierge, briefed on Concierge. Ask it what this is.
+        That is the pitch.
+      </p>
+      <div class="hero-actions">
+        <button class="btn primary" type="button" id="hero-ask">Ask the widget</button>
+        <a class="btn" href="#interview">Write your own brief</a>
+      </div>
+      <p class="hero-status" id="hero-status" aria-live="polite"></p>
+    </section>
+
+    <section class="band" id="safe" aria-labelledby="safe-h">
+      <h2 id="safe-h">Why it's safe by design</h2>
+      <p class="muted">One decision does the work: the agent has no capabilities.</p>
+      <div class="grid four">
+        <article class="card">
+          <h3>Sandboxed</h3>
+          <p>No tools, no function calling, no browsing. There is nothing to escalate <em>to</em>.</p>
+        </article>
+        <article class="card">
+          <h3>No hallucination</h3>
+          <p>The whole brief sits in the system prompt. It answers from what is in front of it and refuses when the answer is not there.</p>
+        </article>
+        <article class="card">
+          <h3>Fast</h3>
+          <p>A small model, streamed tokens, no retrieval round-trip. First token lands quickly.</p>
+        </article>
+        <article class="card">
+          <h3>Locked down</h3>
+          <p>Hardened prompt, client <code>system</code> roles stripped, depth and length caps, per-IP and per-session rate limits, bounded concurrency, a provider circuit breaker.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="band" id="interview" aria-labelledby="interview-h">
+      <h2 id="interview-h">1 · Interview</h2>
+      <p class="muted">Six questions produce a brief the server accepts. Nothing here is stored beyond a 30-minute sandbox you opt into.</p>
+      <div class="split">
+        <form class="interview" id="interview-form" novalidate>
+          <ol class="steps" id="steps"></ol>
+          <div class="step-nav">
+            <button type="button" class="btn" id="step-back">Back</button>
+            <button type="button" class="btn primary" id="step-next">Next</button>
+            <span class="muted small" id="step-count"></span>
+          </div>
+        </form>
+        <div class="interview-result">
+          <div class="result-head">
+            <h3>Brief JSON</h3>
+            <span class="pill" id="brief-status">incomplete</span>
+          </div>
+          <pre class="code" id="brief-json" tabindex="0"></pre>
+          <ul class="errors" id="brief-errors" aria-live="polite"></ul>
+          <div class="row">
+            <button type="button" class="btn primary" id="brief-use" disabled>Use this brief in the live preview</button>
+            <button type="button" class="btn" id="brief-copy">Copy JSON</button>
+          </div>
+          <p class="muted small" id="sandbox-status" aria-live="polite"></p>
+        </div>
+      </div>
+    </section>
+
+    <section class="band" id="configure" aria-labelledby="configure-h">
+      <h2 id="configure-h">2 · Configure</h2>
+      <p class="muted">Every token the widget knows is adjustable. The preview is the real widget talking to the real server; when you have used a brief above, it answers from that brief.</p>
+      <div class="split">
+        <div class="controls">
+          <fieldset>
+            <legend>Preset</legend>
+            <div class="presets" id="presets" role="radiogroup" aria-label="Theme preset"></div>
+          </fieldset>
+          <fieldset class="grid two">
+            <legend>Accent</legend>
+            <label>Accent <input type="color" id="accentColor" value="#6d8bff" /></label>
+            <label>Accent 2 <input type="color" id="accentColor2" value="#a58bff" /></label>
+            <label class="span2 check"><input type="checkbox" id="accent2auto" checked /> Derive accent 2 from accent</label>
+          </fieldset>
+          <fieldset class="grid two">
+            <legend>Shape &amp; density</legend>
+            <label>Radius scale <input type="range" id="radiusScale" min="0" max="2" step="0.05" value="1" /> <output id="radiusScaleOut">1.00</output></label>
+            <label>Density
+              <select id="density"><option value="comfortable">comfortable</option><option value="compact">compact</option></select>
+            </label>
+            <label>Launcher
+              <select id="launcher"><option value="pill">pill</option><option value="bubble">bubble</option><option value="bar">bar</option><option value="inline-input">inline-input</option></select>
+            </label>
+            <label>Position
+              <select id="position"><option value="bottom-right">bottom-right</option><option value="bottom-left">bottom-left</option><option value="inline">inline</option></select>
+            </label>
+            <label class="span2">Font family <input type="text" id="fontFamily" placeholder="system stack" /></label>
+          </fieldset>
+          <fieldset class="grid two">
+            <legend>Copy</legend>
+            <label>Launcher label <input type="text" id="launcherLabel" value="Ask AI" /></label>
+            <label>Tagline <input type="text" id="tagline" value="Ask me anything" /></label>
+            <label class="span2">Greeting <input type="text" id="greeting" value="Hi — ask me anything about this page." /></label>
+            <label class="span2">Suggestions (| separated) <input type="text" id="suggestions" value="What is this?|What does it cost?|How do I get started?" /></label>
+            <label class="span2">Nudge <input type="text" id="nudge" placeholder="Optional teaser above the launcher" /></label>
+          </fieldset>
+          <details class="tokens">
+            <summary>All tokens <span class="muted small" id="token-count"></span></summary>
+            <p class="muted small">Values below are the preset defaults after accent, radius and density are applied. Edit any of them; blank restores the default.</p>
+            <div id="token-groups"></div>
+            <button type="button" class="btn small" id="tokens-reset">Reset overrides</button>
+          </details>
+        </div>
+        <div class="preview-wrap">
+          <div class="preview-head">
+            <h3>Live preview</h3>
+            <span class="pill" id="preview-brief">brief: Concierge</span>
+          </div>
+          <div class="preview-stage" id="preview-stage">
+            <div class="preview-host" id="preview"></div>
+          </div>
+          <p class="muted small">Inline mount of the same embed bundle served at <code>/concierge/embed.js</code>. The preview always mounts inline; <em>Position</em> only changes the export.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="band" id="export" aria-labelledby="export-h">
+      <h2 id="export-h">3 · Export</h2>
+      <p class="muted">Everything below is derived from the configuration above. Paste the script tag into a blank HTML file and it renders exactly this widget against this server.</p>
+      <div class="tabs" role="tablist" aria-label="Export format">
+        <button type="button" role="tab" aria-selected="true" data-tab="script">Script tag</button>
+        <button type="button" role="tab" aria-selected="false" data-tab="brief">Brief JSON</button>
+        <button type="button" role="tab" aria-selected="false" data-tab="react">React</button>
+      </div>
+      <div class="tabpanel" role="tabpanel" data-panel="script">
+        <pre class="code" id="export-script" tabindex="0"></pre>
+        <button type="button" class="btn small" data-copy="export-script">Copy</button>
+      </div>
+      <div class="tabpanel" role="tabpanel" data-panel="brief" hidden>
+        <p class="muted small">Drop this into the file you point <code>CONCIERGE_BRIEF</code> at, or as one page of <code>CONCIERGE_BRIEFS</code> / a packet.</p>
+        <pre class="code" id="export-brief" tabindex="0"></pre>
+        <button type="button" class="btn small" data-copy="export-brief">Copy</button>
+      </div>
+      <div class="tabpanel" role="tabpanel" data-panel="react" hidden>
+        <pre class="code" id="export-react" tabindex="0"></pre>
+        <button type="button" class="btn small" data-copy="export-react">Copy</button>
+      </div>
+    </section>
+
+    <section class="band" id="docs" aria-labelledby="docs-h">
+      <h2 id="docs-h">Docs</h2>
+      <nav class="subnav" aria-label="Docs sections">
+        <a href="#docs-install">Install</a>
+        <a href="#docs-props">Props</a>
+        <a href="#docs-brief">Brief schema</a>
+        <a href="#docs-tokens">Tokens</a>
+        <a href="#docs-selfhost">Self-host</a>
+        <a href="#docs-capabilities">Capability packs</a>
+      </nav>
+
+      <h3 id="docs-install">Install</h3>
+      <p>Two ways, same widget. The script tag needs no build step; the server serves the bundle at <code>/embed.js</code> so the host page never hosts the asset.</p>
+      <pre class="code" id="docs-install-script"></pre>
+      <pre class="code" id="docs-install-react"></pre>
+
+      <h3 id="docs-props">Props and <code>data-*</code> attributes</h3>
+      <p>Every prop has a <code>data-*</code> equivalent (<code>launcherLabel</code> → <code>data-launcher-label</code>).</p>
+      <div class="tablewrap"><table id="props-table"><thead><tr><th>Prop</th><th><code>data-*</code></th><th>Default</th><th>What it does</th></tr></thead><tbody></tbody></table></div>
+
+      <h3 id="docs-brief">Brief schema</h3>
+      <p>Six required strings. <code>docs</code> is the agent's entire world; end it with a <code>LINKS:</code> block of the exact URLs it may share. <code>capabilities</code> is optional and honoured only from server-loaded briefs.</p>
+      <pre class="code" id="docs-brief-schema"></pre>
+      <p>Validate any brief against the running server without storing it:</p>
+      <pre class="code">curl -s -X POST https://concierge.repo.box/concierge/brief/validate \
+  -H 'content-type: application/json' --data @brief.json
+# → {"ok":true,"errors":[]}  or  422 {"ok":false,"errors":["docs must not be empty", …]}</pre>
+
+      <h3 id="docs-tokens">Theming tokens</h3>
+      <p>Generated at page load from the widget's own <code>TOKEN_METADATA</code> and <code>THEME_PRESETS</code> exports, so this table cannot drift from the bundle you embed. Composition order: preset → accent derivation → radius scale → density → <code>themeVars</code>.</p>
+      <div class="tablewrap"><table id="tokens-table"><thead><tr><th>Token</th><th>Category</th><th>Controls</th><th>midnight</th><th>Preset differences</th></tr></thead><tbody></tbody></table></div>
+
+      <h3 id="docs-selfhost">Self-host</h3>
+      <pre class="code" id="docs-selfhost-code"></pre>
+      <p>Server limits (env, default): <code>CONCIERGE_MAX_CONCURRENT</code> 4 · <code>CONCIERGE_MAX_QUEUE_DEPTH</code> 16 · <code>CONCIERGE_REQUEST_TIMEOUT_MS</code> 30000 · <code>CONCIERGE_RATE_LIMIT_IP</code> 20/min · <code>CONCIERGE_RATE_LIMIT_SESSION</code> 12/min · <code>CONCIERGE_CIRCUIT_FAILURES</code> 3. <code>GET /health</code> reports liveness and queue/circuit state; <code>GET /ready</code> returns 503 when saturated. Error codes: <code>queue_full</code>, <code>rate_limited_ip</code>, <code>rate_limited_session</code>, <code>provider_circuit_open</code>. The sandbox used by this page is opt-in (<code>CONCIERGE_SANDBOX=1</code>) and off in a default install.</p>
+
+      <h3 id="docs-capabilities">Optional capability packs</h3>
+      <p>Powerless by default. Each pack is a door you open, only from trusted server-side brief JSON; the <code>/chat</code> body cannot enable, inject or modify any of it.</p>
+      <pre class="code" id="docs-capabilities-code"></pre>
+      <ul>
+        <li><strong>Retrieval</strong> — inline docs or one URL fetched at boot, chunked, top-k injected per turn, bounded by <code>maxInjectedChars</code>.</li>
+        <li><strong>Tools</strong> — an allowlist of server-defined tools (<code>capture_lead</code>, <code>handoff_human</code>). Side-effect tools ask for confirmation; repeats are deduplicated. Client-requested tools are rejected.</li>
+        <li><strong>Generative UI</strong> — <code>ui: true</code> lets the model render declared components through a typed event protocol; off, the stream is text and tool results only.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>Built by <a href="https://repo.box" rel="noopener">repo.box</a> · <a href="https://github.com/yolo-maxi/concierge" rel="noopener">Source</a> · <a href="https://repo.box/blog/powerless-landing-page-agent.html" rel="noopener">Why powerless</a> · <a href="https://frontier.repo.box" rel="noopener">See it on Frontier</a></p>
+  </footer>
+
+  <script defer src="/concierge/embed.js"
+    data-endpoint="/concierge/chat"
+    data-page-id="concierge"
+    data-brand-name="Concierge"
+    data-tagline="Ask what this is"
+    data-greeting="Hi. I'm Concierge, briefed on Concierge. Ask me what it is, how it stays safe, or how to self-host it."
+    data-suggestions="What is Concierge?|Why can't it be jailbroken?|How do I theme it?|How do I self-host?"
+    data-launcher="pill"
+    data-launcher-label="Ask Concierge"
+    data-nudge="This widget is the product. Ask it anything about itself."
+    data-position="bottom-right"></script>
+  <script defer src="/main.js"></script>
+</body>
+</html>

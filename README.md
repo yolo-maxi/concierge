@@ -300,6 +300,16 @@ Server-side model access now goes through a typed provider abstraction in `serve
 
 ---
 
+## Validating a brief, and sandbox briefs
+
+`POST /brief/validate` runs the same checks the packet loader applies and stores nothing. It returns `200 {"ok":true,"errors":[]}` or `422` with every problem listed, so an author can fix a brief in one pass. A `capabilities` block in a client-submitted brief is reported as ignored: capabilities are honoured only from server-loaded briefs.
+
+With `CONCIERGE_SANDBOX=1` the server also accepts `POST /sandbox/brief`. It validates the body, discards any `capabilities`, keeps the brief in memory for 30 minutes (200 entries max, `docs` capped at 8000 chars), and returns an opaque `pageId` beginning with `sandbox-`. `/chat` with that page id answers from the sandbox brief; an unknown or expired id is a `404 sandbox_expired`, never a fallback to the default page. This is what the configurator on concierge.repo.box uses so a visitor can talk to the widget about their own product without anything leaving the server. It is off in a default install.
+
+## concierge.repo.box
+
+The public site lives in `site/` and is plain HTML/CSS/JS with no framework. `scripts/build-site.sh` bundles it into `site/dist`; `scripts/serve-site.mjs` serves that directory locally with `/concierge/*` proxied to a server, exactly like the production Caddy site; `site/test/browser-site.mjs` is the browser gate (hero widget, interview → validated brief → sandbox → preview answering from it, configurator → tokens, export snippet rendering when pasted into a blank page, docs generated from the bundle, mobile). Publish with `scripts/publish-site.sh`, which hands `site/dist` to `~/clawd/scripts/repo-box-publish.sh`. The token and preset tables on the page are rendered from `window.Concierge.TOKEN_METADATA` / `THEME_PRESETS`, which the embed now exposes alongside `mount(props, { container })`, `unmount(container)` and `resolveThemeTokens(options)`.
+
 ## Optional capability packs
 
 Concierge is powerless by default. With no `capabilities` block in the server-loaded brief, prompt assembly and chat behaviour stay on the original code path: no retrieval, no tools, no memory, no action surface. Every capability you add is a door you opened, so configure them only from trusted server-side brief JSON loaded via `CONCIERGE_BRIEF` or `CONCIERGE_BRIEFS`. The client `/chat` body cannot enable, inject, or modify capabilities; the server still strips client `system` messages and ignores capability-shaped request fields.

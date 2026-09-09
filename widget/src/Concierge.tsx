@@ -1,17 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useChat } from "./useChat";
+import { useChat, storageKey } from "./useChat";
 import { UiBlock } from "./ui/UiBlock";
 import { CSS } from "./styles";
-import {
-  THEME_PRESETS,
-  densityTokens,
-  deriveAccentTokens,
-  isThemePresetName,
-  scaleRadiusTokens,
-  type ThemePresetName,
-  type ThemeTokens,
-} from "./themes";
+import { resolveThemeTokens, type ThemePresetName, type ThemeTokens } from "./themes";
 
 // Render assistant text with clickable links: supports [label](url) markdown and
 // bare https URLs. Everything else stays literal text (no HTML injection).
@@ -166,7 +158,7 @@ export function Concierge(props: ConciergeProps) {
     if (inline) return true;
     if (typeof window !== "undefined") {
       try {
-        const saved = window.sessionStorage.getItem("cc_open");
+        const saved = window.sessionStorage.getItem(storageKey("cc_open", pageId));
         if (saved !== null) return saved === "1";
       } catch {
         /* ignore */
@@ -178,7 +170,7 @@ export function Concierge(props: ConciergeProps) {
     setOpenState(v);
     if (typeof window !== "undefined") {
       try {
-        window.sessionStorage.setItem("cc_open", v ? "1" : "0");
+        window.sessionStorage.setItem(storageKey("cc_open", pageId), v ? "1" : "0");
       } catch {
         /* ignore */
       }
@@ -259,20 +251,8 @@ export function Concierge(props: ConciergeProps) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, busy]);
 
-  const presetName = isThemePresetName(theme) ? theme : "midnight";
-  const presetTokens = THEME_PRESETS[presetName];
-  const themeObject = typeof theme === "object" && theme ? theme : {};
-  const tokenVars = {
-    ...presetTokens,
-    ...themeObject,
-    ...deriveAccentTokens(accentColor, accentColor2),
-  };
   const rootVars: React.CSSProperties = {
-    ...(tokenVars as React.CSSProperties),
-    ...(densityTokens(density) as React.CSSProperties),
-    ...(scaleRadiusTokens({ ...tokenVars, ...densityTokens(density) }, radiusScale) as React.CSSProperties),
-    ...(fontFamily ? ({ ["--cc-font-family" as any]: fontFamily } as React.CSSProperties) : {}),
-    ...(themeVars as React.CSSProperties),
+    ...(resolveThemeTokens({ theme, accentColor, accentColor2, radiusScale, density, fontFamily, themeVars }) as React.CSSProperties),
     ...style,
   };
 

@@ -62,13 +62,30 @@ function validatePages(pages: Record<string, PageBrief>): void {
   }
 }
 
-function validateBrief(pageId: string, brief: PageBrief): void {
-  if (!isRecord(brief)) throw new Error(`Concierge packet page "${pageId}" must be an object.`);
-  for (const key of ["brandName", "audience", "objective", "tone", "cta", "docs"] as const) {
-    if (typeof brief[key] !== "string" || brief[key].trim().length === 0) {
-      throw new Error(`Concierge packet page "${pageId}" is missing ${key}.`);
-    }
+export const BRIEF_REQUIRED_KEYS = ["brandName", "audience", "objective", "tone", "cta", "docs"] as const;
+
+/**
+ * The one brief validator. Packet loading throws on the first problem; the
+ * public /brief/validate route reports every problem at once so an author can
+ * fix a brief in one pass. Both call this so the rules cannot drift.
+ */
+export function briefValidationErrors(value: unknown): string[] {
+  if (!isRecord(value)) return ["brief must be a JSON object"];
+  const errors: string[] = [];
+  for (const key of BRIEF_REQUIRED_KEYS) {
+    const v = value[key];
+    if (typeof v !== "string") errors.push(`${key} must be a string`);
+    else if (v.trim().length === 0) errors.push(`${key} must not be empty`);
   }
+  if (value.capabilities !== undefined && !isRecord(value.capabilities)) {
+    errors.push("capabilities must be an object when set");
+  }
+  return errors;
+}
+
+function validateBrief(pageId: string, brief: PageBrief): void {
+  const errors = briefValidationErrors(brief);
+  if (errors.length) throw new Error(`Concierge packet page "${pageId}": ${errors[0]}.`);
 }
 
 function validateProvider(provider: unknown): void {

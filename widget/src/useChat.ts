@@ -39,11 +39,20 @@ function getSessionId(): string {
 
 const TRANSCRIPT_KEY = "cc_transcript";
 
+/**
+ * Storage is scoped per page id so two widgets on one page (say, a live demo
+ * and a configurator preview) keep separate transcripts. No page id keeps the
+ * original key, so existing single-widget sites are unaffected.
+ */
+export function storageKey(base: string, pageId?: string): string {
+  return pageId ? `${base}:${pageId}` : base;
+}
+
 /** Restore a saved transcript for this tab so the chat survives page changes. */
-function restore(greeting?: string): Message[] {
+function restore(greeting?: string, pageId?: string): Message[] {
   if (typeof window !== "undefined") {
     try {
-      const raw = window.sessionStorage.getItem(TRANSCRIPT_KEY);
+      const raw = window.sessionStorage.getItem(storageKey(TRANSCRIPT_KEY, pageId));
       if (raw) {
         const saved = JSON.parse(raw) as Message[];
         // Drop a trailing empty assistant turn (an interrupted stream) — but a
@@ -72,7 +81,7 @@ function restore(greeting?: string): Message[] {
  */
 export function useChat({ endpoint, pageId, greeting }: UseChatOpts) {
   const sessionId = useRef(getSessionId());
-  const [messages, setMessages] = useState<Message[]>(() => restore(greeting));
+  const [messages, setMessages] = useState<Message[]>(() => restore(greeting, pageId));
   const [busy, setBusy] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -80,11 +89,11 @@ export function useChat({ endpoint, pageId, greeting }: UseChatOpts) {
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
-      window.sessionStorage.setItem(TRANSCRIPT_KEY, JSON.stringify(messages));
+      window.sessionStorage.setItem(storageKey(TRANSCRIPT_KEY, pageId), JSON.stringify(messages));
     } catch {
       /* storage full / disabled — non-fatal */
     }
-  }, [messages]);
+  }, [messages, pageId]);
 
   const send = useCallback(
     async (text: string) => {
