@@ -1,3 +1,4 @@
+import { failureForStatus, ProviderFailure } from "../providerFailure.js";
 import type {
   ChatProvider,
   ChatProviderConfig,
@@ -46,8 +47,8 @@ export async function streamChatWithToolCalls(
   });
 
   if (!res.ok || !res.body) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Venice error ${res.status}: ${detail.slice(0, 300)}`);
+    await res.body?.cancel();
+    throw failureForStatus(res.status);
   }
 
   const reader = res.body.getReader();
@@ -56,26 +57,28 @@ export async function streamChatWithToolCalls(
   let full = "";
   const toolCalls = new Map<number, ToolCall>();
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
 
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
 
-    for (const line of lines) {
-      const result = parseStreamLine(line, toolCalls);
-      if (!result) continue;
-      if (result.done) return { content: full, toolCalls: [...toolCalls.values()] };
-      if (result.delta) {
-        full += result.delta;
-        onDelta(result.delta);
+      for (const line of lines) {
+        const result = parseStreamLine(line, toolCalls);
+        if (!result) continue;
+        if (result.done) return { content: full, toolCalls: [...toolCalls.values()] };
+        if (result.delta) {
+          full += result.delta;
+          onDelta(result.delta);
+        }
       }
     }
-  }
 
-  return { content: full, toolCalls: [...toolCalls.values()] };
+    throw new ProviderFailure("provider_failure");
+  } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
 }
 
 export function parseStreamLine(line: string, toolCalls = new Map<number, ToolCall>()): {
@@ -89,6 +92,9 @@ export function parseStreamLine(line: string, toolCalls = new Map<number, ToolCa
 
   try {
     const json = JSON.parse(data);
+    if (json.error) throw new ProviderFailure("provider_failure");
+    if (json.choices?.[0]?.delta?.refusal || json.choices?.[0]?.finish_reason === "content_filter")
+      throw new ProviderFailure("provider_refused");
     const delta = json.choices?.[0]?.delta?.content;
     for (const item of json.choices?.[0]?.delta?.tool_calls ?? []) {
       const index = Number(item.index ?? 0);
@@ -105,7 +111,8 @@ export function parseStreamLine(line: string, toolCalls = new Map<number, ToolCa
       toolCalls.set(index, existing);
     }
     return { done: false, delta };
-  } catch {
-    return null;
+  } catch (error) {
+    if (error instanceof ProviderFailure) throw error;
+    throw new ProviderFailure("provider_failure");
   }
 }

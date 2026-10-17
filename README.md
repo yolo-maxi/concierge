@@ -39,6 +39,10 @@ The widget **cannot** hold the model key — it only knows an endpoint URL. The 
 
 ## Server operations
 
+The production entry point requires a private operations alert route and enables a
+durable aggregate usage budget. See [usage budget operations](docs/usage-budget.md)
+for limits, failure codes, alerts, and recovery. Node.js 24 is used in production.
+
 The server is intentionally small, but it now has bounded request controls for shared deployments:
 
 | Env | Default | Purpose |

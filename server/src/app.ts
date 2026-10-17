@@ -20,6 +20,10 @@ import {
   type Runtime,
 } from "./runtime.js";
 
+import type { UsageBudget } from "./budget.js";
+import { ProviderFailure } from "./providerFailure.js";
+import { HttpError } from "./runtime.js";
+
 const MAX_MESSAGES = 24;
 const MAX_CHARS = 2000;
 const MAX_TOOL_DEPTH = Number(process.env.CONCIERGE_TOOL_MAX_DEPTH || 2);
@@ -29,6 +33,7 @@ export interface ConciergeAppOptions {
   runtime?: Runtime;
   providerFactory?: () => ChatProvider;
   sandbox?: SandboxStore;
+  budget?: UsageBudget;
 }
 
 export function createConciergeApp(options: ConciergeAppOptions = {}) {
@@ -41,6 +46,15 @@ export function createConciergeApp(options: ConciergeAppOptions = {}) {
   const sandbox = options.sandbox ?? (sandboxEnabled ? createSandboxStore() : null);
 
   const app = express();
+  // CORS alone does not reject requests. Reject an unapproved browser origin first.
+  const origins = env.ALLOWED_ORIGINS?.split(",").map(s => s.trim());
+  app.use((req, res, next) => {
+    if (origins && req.headers.origin && !origins.includes(req.headers.origin)) {
+      res.status(403).json({ code: "origin_denied", error: "This origin is not allowed." });
+      return;
+    }
+    next();
+  });
   app.use(express.json({ limit: "256kb" }));
   app.use(
     cors({
@@ -55,7 +69,9 @@ export function createConciergeApp(options: ConciergeAppOptions = {}) {
   app.get("/ready", (_req, res) => {
     const state = runtime.state();
     const queueSaturated = state.queue.active >= state.queue.maxConcurrent && state.queue.queued >= state.queue.maxQueueDepth;
-    const ready = !queueSaturated && state.circuit.state !== "open";
+    let budgetReady = true;
+    try { options.budget?.assertAvailable(); } catch { budgetReady = false; }
+    const ready = budgetReady && !queueSaturated && state.circuit.state !== "open";
     res.status(ready ? 200 : 503).json({ ok: ready, ...state });
   });
 
@@ -148,6 +164,8 @@ export function createConciergeApp(options: ConciergeAppOptions = {}) {
       }
     }
 
+    try { options.budget?.assertAvailable(); } catch (error) { writeHttpError(res, error); return; }
+
     const state = runtime.state();
     if (state.circuit.state === "open") {
       res.status(503).json({
@@ -190,7 +208,8 @@ export function createConciergeApp(options: ConciergeAppOptions = {}) {
     let finished = false;
 
     try {
-      const provider = providerWithCircuit(providerFactory(), runtime);
+      const upstream = providerFactory();
+      const provider = providerWithCircuit(options.budget ? options.budget.wrap(upstream) : upstream, runtime);
       let full = "";
       if (toolDefinitions.length === 0) {
         full = await provider.streamChat(
@@ -276,8 +295,9 @@ export function createConciergeApp(options: ConciergeAppOptions = {}) {
       });
     } catch (err) {
       const name = err instanceof Error ? err.name : "Error";
-      const message = requestSignal?.aborted ? "Request cancelled or timed out." : "Sorry, I hit a snag. Try again?";
-      const code = requestSignal?.aborted ? "request_aborted" : "upstream_error";
+      const safeError = err instanceof ProviderFailure || err instanceof HttpError ? err : undefined;
+      const message = requestSignal?.aborted ? "Request cancelled or timed out." : safeError?.message ?? "The chat provider could not complete this reply. No automatic retry was made.";
+      const code = requestSignal?.aborted ? "request_aborted" : safeError?.code ?? "upstream_error";
       if (!res.headersSent) {
         res.status(requestSignal?.aborted ? 504 : 502).json({ error: message, code, detail: { errorName: name } });
       } else if (!finished) {

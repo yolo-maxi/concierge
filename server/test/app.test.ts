@@ -1,3 +1,5 @@
+import { UsageBudget } from "../src/budget.js";
+import { ProviderFailure } from "../src/providerFailure.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import corpus from "./evaluation-corpus.json" with { type: "json" };
@@ -341,3 +343,45 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
     );
   });
 }
+
+
+test("public boundary and budget refusals never call the provider", async () => {
+  const provider = new FakeProvider();
+  const budget = new UsageBudget({ path: ":memory:", requests: 1, volume: 100000, periodMs: 86400000, send: async () => {} });
+  const app = createConciergeApp({ providerFactory: () => provider, budget,
+    env: { ALLOWED_ORIGINS: "https://concierge.repo.box,https://frontier.repo.box,https://repo.box" } });
+  const server = createServer(app); server.listen(0, "127.0.0.1"); await once(server, "listening");
+  const address = server.address(); assert.ok(address && typeof address !== "string");
+  const url = `http://127.0.0.1:${address.port}`;
+  try {
+    const denied = await fetch(`${url}/chat`, { method: "POST", headers: { "Content-Type": "application/json", Origin: "https://evil.invalid" }, body: JSON.stringify({ messages: [{ role: "user", content: "Hi" }] }) });
+    assert.equal(denied.status, 403);
+    for (const path of ["/v1/chat/completions", "/chat/completions", "/v1/models"]) {
+      const response = await fetch(url + path, { method: "POST" }); assert.equal(response.status, 404);
+    }
+    assert.equal(provider.calls.length, 0);
+    const first = await chat(url, { messages: [{ role: "user", content: "Hi" }], model: "untrusted", tools: [{ function: { name: "exfiltrate" } }] });
+    assert.match(await first.text(), /Tidepool reply/);
+    const second = await chat(url, { messages: [{ role: "user", content: "Hi" }] });
+    assert.equal(second.status, 503); assert.equal((await second.json()).code, "budget_exhausted");
+    assert.equal(provider.calls.length, 1);
+    assert.equal((await fetch(`${url}/ready`)).status, 503);
+    assert.equal((await fetch(`${url}/health`)).status, 200);
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); budget.close(); }
+});
+
+test("provider exhaustion gives a truthful stream failure then blocks without spending", async () => {
+  let calls = 0;
+  const fail = async () => { calls++; throw new ProviderFailure("provider_exhausted"); };
+  const budget = new UsageBudget({ path: ":memory:", requests: 10, volume: 100000, periodMs: 86400000, send: async () => {} });
+  const app = createConciergeApp({ budget, providerFactory: () => ({ name: "venice", streamChat: fail, streamChatWithToolCalls: fail }) });
+  const server = createServer(app); server.listen(0, "127.0.0.1"); await once(server, "listening");
+  const address = server.address(); assert.ok(address && typeof address !== "string");
+  const url = `http://127.0.0.1:${address.port}`;
+  try {
+    const first = await chat(url, { messages: [{ role: "user", content: "Hi" }] });
+    const stream = await first.text(); assert.match(stream, /provider_exhausted/); assert.doesNotMatch(stream, /Try again/);
+    const next = await chat(url, { messages: [{ role: "user", content: "Hi" }] });
+    assert.equal(next.status, 503); assert.equal((await next.json()).code, "provider_exhausted"); assert.equal(calls, 1);
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); budget.close(); }
+});

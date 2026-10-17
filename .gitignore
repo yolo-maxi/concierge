@@ -11,3 +11,9 @@ server/*.brief.json
 server/frontier.brief.json
 dist-deploy/
 site/dist/
+
+# Durable local usage state
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
