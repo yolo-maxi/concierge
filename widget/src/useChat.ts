@@ -1,3 +1,4 @@
+import { ChatHttpFailure, readHttpFailure } from "./httpFailure";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isUiEvent, type UiEvent } from "./ui/UiBlock";
 
@@ -122,7 +123,8 @@ export function useChat({ endpoint, pageId, greeting }: UseChatOpts) {
           }),
         });
 
-        if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw await readHttpFailure(res);
+        if (!res.body) throw new Error("Chat stream is unavailable");
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -184,7 +186,7 @@ export function useChat({ endpoint, pageId, greeting }: UseChatOpts) {
             if (last && last.role === "assistant" && last.content === "") {
               next[next.length - 1] = {
                 role: "assistant",
-                content: "Sorry — I couldn't reach the server. Try again in a moment.",
+                content: err instanceof ChatHttpFailure ? err.message : "The connection to chat failed. No automatic retry was made.",
               };
             }
             return next;
