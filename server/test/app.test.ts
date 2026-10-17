@@ -77,12 +77,12 @@ test("enforces per-IP and per-session request limits with structured evidence", 
 });
 
 test("bounds concurrency, queues only to the configured depth, and exposes readiness", async () => {
-  const provider = new FakeProvider({ delayMs: 250 });
+  const provider = new FakeProvider({ delayMs: 1000 });
   const runtime = createRuntime(
     limitsFromEnv({
       CONCIERGE_MAX_CONCURRENT: "1",
       CONCIERGE_MAX_QUEUE_DEPTH: "1",
-      CONCIERGE_REQUEST_TIMEOUT_MS: "1000",
+      CONCIERGE_REQUEST_TIMEOUT_MS: "3000",
       CONCIERGE_RATE_LIMIT_IP: "20",
       CONCIERGE_RATE_LIMIT_SESSION: "20",
     })
@@ -92,7 +92,10 @@ test("bounds concurrency, queues only to the configured depth, and exposes readi
     const requests = [1, 2, 3].map((i) =>
       chat(url, { messages: [{ role: "user", content: `queued ${i}` }], sessionId: `q-${i}` }, `198.51.100.${i}`)
     );
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await waitFor(() => {
+      const queue = runtime.state().queue;
+      return queue.active === 1 && queue.queued === 1;
+    });
     const ready = await fetch(`${url}/ready`);
     assert.equal(ready.status, 503);
     const responses = await Promise.all(requests);
